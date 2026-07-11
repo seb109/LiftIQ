@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Gym Trainer</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: Arial, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+
+        /* ---- SCREENS ---- */
+        .screen { display: none; padding: 30px 20px; }
+        .screen.active { display: block; }
+
+        h1 {
+            text-align: center;
+            color: #00d4ff;
+            font-size: 2rem;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 30px;
+            font-size: 0.9rem;
+        }
+
+        /* ---- SETUP SCREEN ---- */
+        .setup-card {
+            max-width: 480px;
+            margin: 0 auto;
+            background: #16213e;
+            border-radius: 16px;
+            padding: 32px;
+            border: 1px solid #0f3460;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            color: #888;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            letter-spacing: 1px;
+        }
+
+        .form-group select,
+        .form-group input {
+            width: 100%;
+            padding: 12px 16px;
+            background: #0f3460;
+            border: 1px solid #1a4a7a;
+            border-radius: 8px;
+            color: #eee;
+            font-size: 1rem;
+        }
+
+        .mode-buttons {
+            display: flex;
+            gap: 12px;
+        }
+
+        .mode-btn {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #0f3460;
+            border-radius: 8px;
+            background: transparent;
+            color: #888;
+            cursor: pointer;
+            font-size: 0.95rem;
+            transition: all 0.2s;
+        }
+
+        .mode-btn.selected {
+            border-color: #00d4ff;
+            color: #00d4ff;
+            background: rgba(0, 212, 255, 0.1);
+        }
+
+        .file-input-wrapper {
+            display: none;
+            margin-top: 12px;
+        }
+
+        .file-input-wrapper input {
+            width: 100%;
+            padding: 10px;
+            background: #0f3460;
+            border: 1px solid #1a4a7a;
+            border-radius: 8px;
+            color: #eee;
+        }
+
+        .btn-start {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #00d4ff, #0099bb);
+            border: none;
+            border-radius: 10px;
+            color: #000;
+            font-size: 1.1rem;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 8px;
+            transition: opacity 0.2s;
+        }
+
+        .btn-start:hover { opacity: 0.9; }
+
+        /* ---- TRAINER SCREEN ---- */
+        .trainer-layout {
+            display: flex;
+            gap: 20px;
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .video-section { flex: 1; }
+
+        #video-feed {
+            width: 100%;
+            border-radius: 12px;
+            border: 2px solid #00d4ff;
+            background: #000;
+            min-height: 400px;
+            display: block;
+        }
+
+        .side-panel {
+            width: 280px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        /* sets tracker */
+        .sets-tracker {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 16px;
+            border: 1px solid #0f3460;
+        }
+
+        .sets-tracker h3 {
+            color: #888;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+
+        .set-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid #0f3460;
+        }
+
+        .set-row:last-child { border-bottom: none; }
+
+        .set-icon { font-size: 1.2rem; }
+
+        .set-label {
+            flex: 1;
+            font-size: 0.9rem;
+            color: #aaa;
+        }
+
+        .set-reps {
+            font-size: 0.9rem;
+            font-weight: bold;
+            color: #00d4ff;
+        }
+
+        /* stat cards */
+        .stat-card {
+            background: #16213e;
+            border-radius: 10px;
+            padding: 14px 16px;
+            border: 1px solid #0f3460;
+        }
+
+        .stat-label {
+            font-size: 0.7rem;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #00d4ff;
+        }
+
+        .stat-sub {
+            font-size: 0.8rem;
+            color: #666;
+        }
+
+        /* feedback box */
+        .feedback-box {
+            background: #16213e;
+            border-radius: 10px;
+            padding: 14px 16px;
+            border-left: 4px solid #f59e0b;
+        }
+
+        .feedback-box .label {
+            font-size: 0.7rem;
+            color: #f59e0b;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 6px;
+        }
+
+        .feedback-box p {
+            font-size: 0.85rem;
+            color: #ddd;
+            line-height: 1.4;
+        }
+
+        /* rest overlay */
+        .rest-banner {
+            display: none;
+            background: linear-gradient(135deg, #0f3460, #16213e);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            border: 2px solid #00d4ff;
+        }
+
+        .rest-banner.active { display: block; }
+
+        .rest-timer {
+            font-size: 3rem;
+            font-weight: bold;
+            color: #00d4ff;
+        }
+
+        .rest-label {
+            color: #888;
+            font-size: 0.85rem;
+            margin-bottom: 8px;
+        }
+
+        /* ---- SESSION COMPLETE SCREEN ---- */
+        .complete-card {
+            max-width: 600px;
+            margin: 0 auto;
+            background: #16213e;
+            border-radius: 16px;
+            padding: 32px;
+            border: 1px solid #0f3460;
+            text-align: center;
+        }
+
+        .score-badge {
+            font-size: 3.5rem;
+            font-weight: bold;
+            color: #00d4ff;
+            margin: 16px 0;
+        }
+
+        .summary-text {
+            text-align: left;
+            background: #0f3460;
+            border-radius: 10px;
+            padding: 16px;
+            margin: 20px 0;
+            font-size: 0.9rem;
+            line-height: 1.6;
+            color: #ddd;
+            white-space: pre-wrap;
+        }
+
+        .sets-summary {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            margin: 16px 0;
+            flex-wrap: wrap;
+        }
+
+        .set-badge {
+            background: #0f3460;
+            border-radius: 8px;
+            padding: 10px 16px;
+            font-size: 0.85rem;
+        }
+
+        .set-badge span {
+            display: block;
+            color: #00d4ff;
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+
+        .btn-new-session {
+            padding: 14px 32px;
+            background: linear-gradient(135deg, #00d4ff, #0099bb);
+            border: none;
+            border-radius: 10px;
+            color: #000;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 16px;
+        }
+
+        /* loading spinner */
+        .loading {
+            color: #888;
+            font-style: italic;
+            font-size: 0.85rem;
+        }
+    </style>
+</head>
+<body>
+
+<!-- ====== SETUP SCREEN ====== -->
+<div id="screen-setup" class="screen active">
+    <h1>🏋️ AI Gym Trainer</h1>
+    <p class="subtitle">Set up your session and let's get to work</p>
+
+    <div class="setup-card">
+        <div class="form-group">
+            <label>Exercise</label>
+            <select id="setup-exercise">
+                <option value="squat">🦵 Squats</option>
+                <option value="pushup">💪 Push-Ups</option>
+                <option value="bicep_curl">💪 Bicep Curls</option>
+                <option value="shoulder_press">🙌 Shoulder Press</option>
+                <option value="lunge">🚶 Lunges</option>
+                <option value="deadlift">🏋️ Deadlift</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label>Target Reps per Set</label>
+            <input type="number" id="setup-reps" value="10" min="1" max="100">
+        </div>
+
+        <div class="form-group">
+            <label>Number of Sets</label>
+            <input type="number" id="setup-sets" value="3" min="1" max="10">
+        </div>
+
+        <div class="form-group">
+            <label>Mode</label>
+            <div class="mode-buttons">
+                <button class="mode-btn selected" id="btn-webcam-mode" onclick="selectMode('webcam')">
+                    📷 Live Webcam
+                </button>
+                <button class="mode-btn" id="btn-upload-mode" onclick="selectMode('upload')">
+                    📁 Upload Video
+                </button>
+            </div>
+            <div class="file-input-wrapper" id="file-wrapper">
+                <input type="file" id="video-file" accept="video/*">
+            </div>
+        </div>
+
+        <button class="btn-start" onclick="startSession()">▶ Start Session</button>
+    </div>
+</div>
+
+<!-- ====== TRAINER SCREEN ====== -->
+<div id="screen-trainer" class="screen">
+    <h1 style="margin-bottom:20px;">🏋️ AI Gym Trainer</h1>
+
+    <div class="trainer-layout">
+
+        <!-- LEFT: Video -->
+        <div class="video-section">
+            <img id="video-feed" src="" alt="Stream loading...">
+
+            <!-- Rest banner shown on top when resting -->
+            <div class="rest-banner" id="rest-banner">
+                <div class="rest-label">REST TIME — Next set coming up!</div>
+                <div class="rest-timer" id="rest-countdown">60</div>
+                <div style="color:#888; font-size:0.8rem; margin-top:8px;" id="set-feedback-rest"></div>
+            </div>
+        </div>
+
+        <!-- RIGHT: Panel -->
+        <div class="side-panel">
+
+            <!-- Sets tracker -->
+            <div class="sets-tracker">
+                <h3>Sets Progress</h3>
+                <div id="sets-list"></div>
+            </div>
+
+            <!-- Reps counter -->
+            <div class="stat-card">
+                <div class="stat-label">Reps This Set</div>
+                <div class="stat-value"><span id="stat-reps">0</span><span style="font-size:1rem; color:#666"> / <span id="stat-target-reps">10</span></span></div>
+            </div>
+
+            <!-- Stage -->
+            <div class="stat-card">
+                <div class="stat-label">Stage</div>
+                <div class="stat-value" style="font-size:1.3rem;" id="stat-stage">-</div>
+            </div>
+
+            <!-- Real-time feedback -->
+            <div class="feedback-box">
+                <div class="label">Live Feedback</div>
+                <p id="stat-feedback">-</p>
+            </div>
+
+            <!-- Trainer AI feedback -->
+            <div class="feedback-box" style="border-left-color: #00d4ff;">
+                <div class="label" style="color:#00d4ff;">Trainer</div>
+                <p id="stat-trainer">-</p>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<!-- ====== SESSION COMPLETE SCREEN ====== -->
+<div id="screen-complete" class="screen">
+    <h1>💪 Session Complete!</h1>
+    <p class="subtitle">Here's your performance breakdown</p>
+
+    <div class="complete-card">
+        <div id="complete-sets-summary" class="sets-summary"></div>
+
+        <div class="loading" id="summary-loading">Analyzing your session...</div>
+        <div class="summary-text" id="summary-text" style="display:none;"></div>
+
+        <button class="btn-new-session" onclick="newSession()">🔄 Start New Session</button>
+    </div>
+</div>
+
+<script>
+    let selectedMode = 'webcam';
+    let statsInterval = null;
+    let lastSetCount = 0;
+    let sessionComplete = false;
+
+    function selectMode(mode) {
+        selectedMode = mode;
+        document.getElementById('btn-webcam-mode').classList.toggle('selected', mode === 'webcam');
+        document.getElementById('btn-upload-mode').classList.toggle('selected', mode === 'upload');
+        document.getElementById('file-wrapper').style.display = mode === 'upload' ? 'block' : 'none';
+    }
+
+    function showScreen(id) {
+        document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+        document.getElementById(id).classList.add('active');
+    }
+
+    async function startSession() {
+        const exercise = document.getElementById('setup-exercise').value;
+        const reps = parseInt(document.getElementById('setup-reps').value);
+        const sets = parseInt(document.getElementById('setup-sets').value);
+
+        // start session on backend
+        await fetch('/start_session', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({exercise, target_reps: reps, target_sets: sets})
+        });
+
+        // set up video feed
+        if (selectedMode === 'webcam') {
+            document.getElementById('video-feed').src = '/webcam_feed';
+        } else {
+            const file = document.getElementById('video-file').files[0];
+            if (!file) { alert('Please select a video file!'); return; }
+            const formData = new FormData();
+            formData.append('file', file);
+            await fetch('/upload_video', { method: 'POST', body: formData });
+            document.getElementById('video-feed').src = '/uploaded_feed';
+        }
+
+        document.getElementById('stat-target-reps').textContent = reps;
+        lastSetCount = 0;
+        sessionComplete = false;
+        showScreen('screen-trainer');
+        startPolling();
+    }
+
+    function startPolling() {
+        if (statsInterval) clearInterval(statsInterval);
+        statsInterval = setInterval(updateStats, 1000);
+    }
+
+    async function updateStats() {
+        const res = await fetch('/stats');
+        const data = await res.json();
+
+        if (data.session_complete && !sessionComplete) {
+            sessionComplete = true;
+            clearInterval(statsInterval);
+            showCompleteScreen(data);
+            return;
+        }
+
+        // update reps and stage
+        document.getElementById('stat-reps').textContent = data.counter;
+        document.getElementById('stat-stage').textContent = data.stage || '-';
+        document.getElementById('stat-feedback').textContent = data.feedback || '-';
+        document.getElementById('stat-trainer').textContent = data.ai_feedback || '-';
+
+        // rest banner
+        const restBanner = document.getElementById('rest-banner');
+        if (data.is_resting) {
+            restBanner.classList.add('active');
+            document.getElementById('rest-countdown').textContent = data.rest_remaining + 's';
+            document.getElementById('set-feedback-rest').textContent = data.set_feedback || '';
+        } else {
+            restBanner.classList.remove('active');
+        }
+
+        // trigger groq feedback when new set completes
+        if (data.completed_sets && data.completed_sets.length > lastSetCount) {
+            lastSetCount = data.completed_sets.length;
+            fetch('/get_set_feedback');
+        }
+
+        // update sets tracker
+        updateSetsTracker(data);
+    }
+
+    function updateSetsTracker(data) {
+        const list = document.getElementById('sets-list');
+        list.innerHTML = '';
+        for (let i = 1; i <= data.target_sets; i++) {
+            const completed = data.completed_sets && data.completed_sets.find(s => s.set_number === i);
+            const isCurrent = i === data.current_set && !data.session_complete;
+            const row = document.createElement('div');
+            row.className = 'set-row';
+            row.innerHTML = `
+                <span class="set-icon">${completed ? '✅' : isCurrent ? '🔄' : '⬜'}</span>
+                <span class="set-label">Set ${i}</span>
+                <span class="set-reps">${completed ? completed.reps_completed + ' reps' : isCurrent ? data.counter + ' reps' : '-'}</span>
+            `;
+            list.appendChild(row);
+        }
+    }
+
+    function showCompleteScreen(data) {
+        // build sets summary badges
+        const container = document.getElementById('complete-sets-summary');
+        container.innerHTML = '';
+        if (data.completed_sets) {
+            data.completed_sets.forEach(s => {
+                const badge = document.createElement('div');
+                badge.className = 'set-badge';
+                badge.innerHTML = `Set ${s.set_number}<span>${s.reps_completed} reps</span>`;
+                container.appendChild(badge);
+            });
+        }
+
+        showScreen('screen-complete');
+
+        // poll for summary
+        const summaryInterval = setInterval(async () => {
+            const res = await fetch('/stats');
+            const d = await res.json();
+            if (d.session_summary) {
+                clearInterval(summaryInterval);
+                document.getElementById('summary-loading').style.display = 'none';
+                document.getElementById('summary-text').style.display = 'block';
+                document.getElementById('summary-text').textContent = d.session_summary;
+            }
+        }, 1500);
+    }
+
+    function newSession() {
+        document.getElementById('video-feed').src = '';
+        showScreen('screen-setup');
+    }
+</script>
+
+</body>
+</html>
