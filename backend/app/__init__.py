@@ -1,0 +1,1 @@
+"""LiftIQ FastAPI Application."""
