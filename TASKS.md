@@ -1,6 +1,12 @@
 Repository Analysis
 
-☐ Complete
+✅ Complete
+
+Phase 1A — Regression Baselines
+
+☐ Capture canonical metrics for all local exercise videos
+☐ Add shoulder-press video to complete six-exercise coverage
+☐ Verify baselines before each architecture change
 
 Authentication
 

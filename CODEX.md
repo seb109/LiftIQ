@@ -581,3 +581,13 @@ Temporary code
 Incomplete classes
 
 Every generated implementation should be production-ready.
+## Regression Rule
+
+Before modifying any existing production logic:
+
+1. Establish regression baselines using the existing implementation.
+2. Record expected outputs for all supported exercises.
+3. After every refactor, compare results against the baseline.
+4. Functional behavior must remain unchanged unless explicitly approved.
+
+Never refactor working computer vision logic without first creating regression tests.

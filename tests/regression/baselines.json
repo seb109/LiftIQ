@@ -1,0 +1,115 @@
+{
+  "baseline_version": 1,
+  "engine": "gym_trainer.py",
+  "exercises": {
+    "squat": {
+      "status": "recorded",
+      "source": "vids/squat/squat1.mp4",
+      "source_sha256": "2feb5e699ec2ecbc53ac14277eb3d234b046ea413a5b748e546ba7651907d478",
+      "source_frame_count": 192,
+      "processed_frame_count": 192,
+      "duration_seconds": 8.0,
+      "reps": 0,
+      "form_score": null,
+      "per_rep_form_scores": [],
+      "corrections": {
+        "event_count": 349,
+        "messages": {
+          "Chest up \u2014 you're leaning too far forward!": 174,
+          "Push knees out \u2014 they're caving in!": 175
+        }
+      }
+    },
+    "pushup": {
+      "status": "recorded",
+      "source": "vids/pushups1.mp4",
+      "source_sha256": "d2432458615249e6343bd8ed3006fdfcfcb6ffd98ac8825c5e2257f32f6032c5",
+      "source_frame_count": 501,
+      "processed_frame_count": 501,
+      "duration_seconds": 16.7,
+      "reps": 6,
+      "form_score": 83.33,
+      "per_rep_form_scores": [
+        100,
+        80,
+        60,
+        100,
+        80,
+        80
+      ],
+      "corrections": {
+        "event_count": 176,
+        "messages": {
+          "Squeeze your core \u2014 hips are sagging!": 55,
+          "Tuck your elbows \u2014 about 45\u00b0 from your body!": 121
+        }
+      }
+    },
+    "bicep_curl": {
+      "status": "recorded",
+      "source": "vids/bicep_curls/bicep1.mp4",
+      "source_sha256": "f9757ec9743596c828bb144de8fd9932feafdcd6f1fb2234a1b5c4372219a37e",
+      "source_frame_count": 817,
+      "processed_frame_count": 817,
+      "duration_seconds": 27.233,
+      "reps": 5,
+      "form_score": 60.0,
+      "per_rep_form_scores": [
+        60,
+        60,
+        60,
+        60,
+        60
+      ],
+      "corrections": {
+        "event_count": 1627,
+        "messages": {
+          "Pin your elbow to your side \u2014 don't let it drift!": 811,
+          "Stop swinging \u2014 keep your torso locked!": 816
+        }
+      }
+    },
+    "lunge": {
+      "status": "recorded",
+      "source": "vids/lunges/lunges1.mp4",
+      "source_sha256": "63c82d60b224fe3eb8af7f3738957dddd43079851b90d41aa0b511bb261c5262",
+      "source_frame_count": 418,
+      "processed_frame_count": 418,
+      "duration_seconds": 16.72,
+      "reps": 0,
+      "form_score": null,
+      "per_rep_form_scores": [],
+      "corrections": {
+        "event_count": 652,
+        "messages": {
+          "Drive your knee over your toe \u2014 it's caving in!": 412,
+          "Keep your chest up \u2014 don't lean forward!": 240
+        }
+      }
+    },
+    "deadlift": {
+      "status": "recorded",
+      "source": "vids/deadlift/deadlift1.mp4",
+      "source_sha256": "5f72e2a399e3d8f6e50f0c86f727271cd3a25ee32e1ba225b861bc0ba38e9f7e",
+      "source_frame_count": 833,
+      "processed_frame_count": 833,
+      "duration_seconds": 27.767,
+      "reps": 2,
+      "form_score": 80.0,
+      "per_rep_form_scores": [
+        80,
+        80
+      ],
+      "corrections": {
+        "event_count": 340,
+        "messages": {
+          "Keep your back flat \u2014 hinge from the hips, not the spine!": 340
+        }
+      }
+    },
+    "shoulder_press": {
+      "status": "missing_corpus",
+      "reason": "No local shoulder-press video is available."
+    }
+  }
+}
