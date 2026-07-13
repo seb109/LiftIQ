@@ -51,3 +51,4 @@ Screenshots
 Roadmap
 
 License
+this is not in production state or anything so don't rely on this as its not completed and has messy architecture and work flow
