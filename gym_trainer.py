@@ -1,18 +1,30 @@
+import logging
 import random
 import cv2
 import mediapipe as mp
 import numpy as np
 import time
 
+logger = logging.getLogger(__name__)
+
 # ----------- INIT ----------- #
 mp_pose = mp.solutions.pose
 mp_drawing = mp.solutions.drawing_utils
 
-pose = mp_pose.Pose(
-    model_complexity=1,
-    min_detection_confidence=0.6,
-    min_tracking_confidence=0.6
-)
+
+def _create_pose():
+    # A fresh instance each session start — MediaPipe's Pose tracker keeps
+    # internal state (its last-known ROI) between calls, which otherwise
+    # biases landmark detection on the next session's opening frames with
+    # whatever the previous, unrelated video/session last saw.
+    return mp_pose.Pose(
+        model_complexity=1,
+        min_detection_confidence=0.6,
+        min_tracking_confidence=0.6
+    )
+
+
+pose = _create_pose()
 
 # ----------- PRIMARY ANGLE CONFIG ----------- #
 # Each exercise defines:
@@ -386,44 +398,170 @@ feedback_messages = {
     }
 }
 
-# ----------- REP STATE ----------- #
-state = {
-    "current_exercise": "squat",
-    "counter": 0,
-    "stage": None,
-    "feedback": "",
-    "ai_feedback": "",
-    "last_rep_time": 0,
-    "last_stage_change_time": time.time(),
-    "cooldown": 0.8,
-    "min_angle_this_rep": 180,
-    "angle_history": [],
-    "rep_start_time": time.time(),
-    "form_metrics": {},        # {check_name: float} — current frame values
-    "form_violations": [],     # [{check, value, message}] — current frame
-    "form_violation_history": {}  # {check_name: frame_count} — resets per rep
-}
+# ----------- SESSION & STATE MANAGEMENT ----------- #
+DEFAULT_SESSION_ID = "default"
+SESSION_TTL_SECONDS = 1800  # 30 minutes in-memory TTL for abandoned sessions
 
-# ----------- SESSION STATE ----------- #
-session = {
-    "active": False,
-    "exercise": "squat",
-    "target_reps": 10,
-    "target_sets": 3,
-    "current_set": 1,
-    "completed_sets": [],
-    "current_set_depths": [],
-    "current_set_rep_times": [],
-    "current_set_form_scores": [],  # 0–100 per rep
-    "rep_start_time": None,
-    "is_resting": False,
-    "rest_start_time": None,
-    "rest_duration": 60,
-    "set_feedback": "",
-    "session_summary": "",
-    "session_complete": False,
-    "target_depth": 85
-}
+def _create_default_rep_state(exercise="squat"):
+    return {
+        "current_exercise": exercise,
+        "counter": 0,
+        "stage": None,
+        "feedback": "",
+        "ai_feedback": "",
+        "last_rep_time": 0,
+        "last_stage_change_time": time.time(),
+        "cooldown": 0.8,
+        "min_angle_this_rep": 180,
+        "angle_history": [],
+        "rep_start_time": time.time(),
+        "form_metrics": {},        # {check_name: float} — current frame values
+        "form_violations": [],     # [{check, value, message}] — current frame
+        "form_violation_history": {}  # {check_name: frame_count} — resets per rep
+    }
+
+
+def _create_default_session_state(exercise="squat", target_reps=10, target_sets=3, rest_duration=60):
+    return {
+        "active": False,
+        "exercise": exercise,
+        "target_reps": target_reps,
+        "target_sets": target_sets,
+        "current_set": 1,
+        "completed_sets": [],
+        "current_set_depths": [],
+        "current_set_rep_times": [],
+        "current_set_form_scores": [],  # 0–100 per rep
+        "rep_start_time": None,
+        "is_resting": False,
+        "rest_start_time": None,
+        "rest_duration": rest_duration,
+        "set_feedback": "",
+        "session_summary": "",
+        "session_complete": False,
+        "target_depth": EXERCISES.get(exercise, {}).get("down_angle", 85)
+    }
+
+
+class WorkoutSessionState:
+    """Encapsulates all mutable workout, rep, and MediaPipe tracker state for a single session."""
+    def __init__(self, session_id: str, exercise: str = "squat", target_reps: int = 10, target_sets: int = 3, rest_duration: int = 60):
+        self.session_id = session_id
+        self.pose = _create_pose()
+        self.state = _create_default_rep_state(exercise)
+        self.session = _create_default_session_state(exercise, target_reps, target_sets, rest_duration)
+        self.last_accessed = time.time()
+
+    def touch(self):
+        self.last_accessed = time.time()
+
+
+_sessions: dict[str, WorkoutSessionState] = {}
+
+
+def _cleanup_expired_sessions(ttl_seconds: float = SESSION_TTL_SECONDS):
+    """Purge sessions inactive for longer than ttl_seconds (except DEFAULT_SESSION_ID)."""
+    now = time.time()
+    expired = [
+        sid for sid, sess in list(_sessions.items())
+        if sid != DEFAULT_SESSION_ID and (now - sess.last_accessed) > ttl_seconds
+    ]
+    for sid in expired:
+        delete_session(sid)
+
+
+def get_session_state(session_id: str = None, create_if_missing: bool = True) -> WorkoutSessionState:
+    _cleanup_expired_sessions()
+    sid = session_id or DEFAULT_SESSION_ID
+    if sid not in _sessions:
+        if create_if_missing:
+            _sessions[sid] = WorkoutSessionState(sid)
+        else:
+            raise KeyError(f"Session '{sid}' not found")
+    sess = _sessions[sid]
+    sess.touch()
+    return sess
+
+
+def delete_session(session_id: str):
+    """Clean up and delete a workout session instance."""
+    if session_id in _sessions:
+        sess = _sessions.pop(session_id)
+        try:
+            sess.pose.close()
+        except Exception:
+            pass
+
+
+def end_session(session_id: str = None):
+    """End and clean up a workout session."""
+    sid = session_id or DEFAULT_SESSION_ID
+    delete_session(sid)
+
+
+def get_active_session_count() -> int:
+    """Return the current number of in-memory active workout sessions."""
+    return len(_sessions)
+
+
+class _SessionDictProxy(dict):
+    """Proxy dictionary forwarding dict operations to the default session's state or session dict."""
+    def __init__(self, key_type: str):
+        super().__init__()
+        self._key_type = key_type
+
+    @property
+    def _target(self) -> dict:
+        sess = get_session_state(DEFAULT_SESSION_ID)
+        return sess.state if self._key_type == 'state' else sess.session
+
+    def __getitem__(self, key):
+        return self._target[key]
+
+    def __setitem__(self, key, value):
+        self._target[key] = value
+
+    def __delitem__(self, key):
+        del self._target[key]
+
+    def __contains__(self, key):
+        return key in self._target
+
+    def __len__(self):
+        return len(self._target)
+
+    def __iter__(self):
+        return iter(self._target)
+
+    def __repr__(self):
+        return repr(self._target)
+
+    def __str__(self):
+        return str(self._target)
+
+    def get(self, key, default=None):
+        return self._target.get(key, default)
+
+    def keys(self):
+        return self._target.keys()
+
+    def values(self):
+        return self._target.values()
+
+    def items(self):
+        return self._target.items()
+
+    def copy(self):
+        return self._target.copy()
+
+
+state = _SessionDictProxy('state')
+session = _SessionDictProxy('session')
+
+def __getattr__(name: str):
+    if name == "pose":
+        return get_session_state(DEFAULT_SESSION_ID).pose
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 SMOOTHING_WINDOW = 5
 
@@ -794,84 +932,101 @@ def compute_rep_form_score(exercise: str, violation_history: dict) -> int:
 # STATE RESET
 # =============================================================================
 
-def _reset_rep_form_tracking():
+def _reset_rep_form_tracking(sess: WorkoutSessionState = None):
     """Clear per-rep violation counters at the start of each new rep."""
-    state["form_violation_history"] = {"_total_frames": 0}
-    for chk in FORM_CHECKS.get(state["current_exercise"], []):
-        state["form_violation_history"][chk["name"]] = 0
+    if sess is None:
+        sess = get_session_state(DEFAULT_SESSION_ID)
+    st = sess.state
+    st["form_violation_history"] = {"_total_frames": 0}
+    for chk in FORM_CHECKS.get(st["current_exercise"], []):
+        st["form_violation_history"][chk["name"]] = 0
 
 
-def reset_state(exercise=None):
-    state["counter"]               = 0
-    state["stage"]                 = None
-    state["feedback"]              = ""
-    state["ai_feedback"]           = ""
-    state["last_rep_time"]         = 0
-    state["last_stage_change_time"] = time.time()
-    state["min_angle_this_rep"]    = 180
-    state["angle_history"]         = []
-    state["rep_start_time"]        = time.time()
-    state["form_metrics"]          = {}
-    state["form_violations"]       = []
-    state["form_violation_history"] = {}
+def reset_state(exercise=None, session_id: str = None):
+    sess = get_session_state(session_id)
+    st = sess.state
+    st["counter"]               = 0
+    st["stage"]                 = None
+    st["feedback"]              = ""
+    st["ai_feedback"]           = ""
+    st["last_rep_time"]         = 0
+    st["last_stage_change_time"] = time.time()
+    st["min_angle_this_rep"]    = 180
+    st["angle_history"]         = []
+    st["rep_start_time"]        = time.time()
+    st["form_metrics"]          = {}
+    st["form_violations"]       = []
+    st["form_violation_history"] = {}
     if exercise:
-        state["current_exercise"] = exercise
+        st["current_exercise"] = exercise
 
 
 # =============================================================================
 # SESSION CONTROL
 # =============================================================================
 
-def start_session(exercise, target_reps, target_sets, rest_duration=60):
-    session["active"]                  = True
-    session["exercise"]                = exercise
-    session["target_reps"]             = target_reps
-    session["target_sets"]             = target_sets
-    session["current_set"]             = 1
-    session["completed_sets"]          = []
-    session["current_set_depths"]      = []
-    session["current_set_rep_times"]   = []
-    session["current_set_form_scores"] = []
-    session["rep_start_time"]          = time.time()
-    session["is_resting"]              = False
-    session["rest_start_time"]         = None
-    session["rest_duration"]           = rest_duration
-    session["set_feedback"]            = ""
-    session["session_summary"]         = ""
-    session["session_complete"]        = False
-    session["target_depth"]            = EXERCISES[exercise]["down_angle"]
-    reset_state(exercise)
+def start_session(exercise, target_reps, target_sets, rest_duration=60, session_id: str = None):
+    sid = session_id or DEFAULT_SESSION_ID
+    sess = get_session_state(sid)
+    sess.pose = _create_pose()
+    sn = sess.session
+    sn["active"]                  = True
+    sn["exercise"]                = exercise
+    sn["target_reps"]             = target_reps
+    sn["target_sets"]             = target_sets
+    sn["current_set"]             = 1
+    sn["completed_sets"]          = []
+    sn["current_set_depths"]      = []
+    sn["current_set_rep_times"]   = []
+    sn["current_set_form_scores"] = []
+    sn["rep_start_time"]          = time.time()
+    sn["is_resting"]              = False
+    sn["rest_start_time"]         = None
+    sn["rest_duration"]           = rest_duration
+    sn["set_feedback"]            = ""
+    sn["session_summary"]         = ""
+    sn["session_complete"]        = False
+    sn["target_depth"]            = EXERCISES[exercise]["down_angle"]
+    reset_state(exercise, session_id=sid)
+    return sid
 
 
-def complete_set():
-    session["completed_sets"].append({
-        "set_number":    session["current_set"],
-        "depths":        list(session["current_set_depths"]),
-        "rep_times":     list(session["current_set_rep_times"]),
-        "form_scores":   list(session["current_set_form_scores"]),
-        "reps_completed": state["counter"]
+def complete_set(sess: WorkoutSessionState = None):
+    if sess is None:
+        sess = get_session_state(DEFAULT_SESSION_ID)
+    sn = sess.session
+    st = sess.state
+    sn["completed_sets"].append({
+        "set_number":    sn["current_set"],
+        "depths":        list(sn["current_set_depths"]),
+        "rep_times":     list(sn["current_set_rep_times"]),
+        "form_scores":   list(sn["current_set_form_scores"]),
+        "reps_completed": st["counter"]
     })
-    session["is_resting"]              = True
-    session["rest_start_time"]         = time.time()
-    session["current_set_depths"]      = []
-    session["current_set_rep_times"]   = []
-    session["current_set_form_scores"] = []
-    reset_state(session["exercise"])
+    sn["is_resting"]              = True
+    sn["rest_start_time"]         = time.time()
+    sn["current_set_depths"]      = []
+    sn["current_set_rep_times"]   = []
+    sn["current_set_form_scores"] = []
+    reset_state(sn["exercise"], session_id=sess.session_id)
 
 
 # =============================================================================
 # OVERLAY HELPERS
 # =============================================================================
 
-def _draw_form_hud(frame, exercise):
+def _draw_form_hud(frame, exercise, sess: WorkoutSessionState = None):
     """
     Top-right panel showing each form check with its live value.
     Green = passing, Red = failing.
     """
+    if sess is None:
+        sess = get_session_state(DEFAULT_SESSION_ID)
     checks = FORM_CHECKS.get(exercise, [])
     if not checks:
         return
 
+    st = sess.state
     h, w, _ = frame.shape
     panel_x  = w - 280
     panel_y  = 10
@@ -879,8 +1034,8 @@ def _draw_form_hud(frame, exercise):
 
     for i, chk in enumerate(checks):
         name  = chk["name"]
-        value = state["form_metrics"].get(name)
-        is_vio = any(v["check"] == name for v in state["form_violations"])
+        value = st["form_metrics"].get(name)
+        is_vio = any(v["check"] == name for v in st["form_violations"])
 
         color  = (0, 60, 255) if is_vio else (0, 200, 80)
         status = chk["messages"]["fail"] if is_vio else chk["messages"]["pass"]
@@ -894,8 +1049,8 @@ def _draw_form_hud(frame, exercise):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.52, color, 1, cv2.LINE_AA)
 
     # Flash the top violation message at the bottom of the frame
-    if state["form_violations"]:
-        top_msg = state["form_violations"][0]["message"]
+    if st["form_violations"]:
+        top_msg = st["form_violations"][0]["message"]
         cv2.rectangle(frame, (0, h - 45), (w, h), (0, 0, 180), -1)
         cv2.putText(frame, top_msg, (12, h - 14),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
@@ -905,19 +1060,24 @@ def _draw_form_hud(frame, exercise):
 # MAIN FRAME PROCESSOR
 # =============================================================================
 
-def process_frame(frame):
-    current_exercise = state["current_exercise"]
+def process_frame(frame, session_id: str = None):
+    sess = get_session_state(session_id)
+    st = sess.state
+    sn = sess.session
+    pose_tracker = sess.pose
+
+    current_exercise = st["current_exercise"]
     config           = EXERCISES[current_exercise]
 
     # ── REST TIMER ───────────────────────────────────────────────────────────
-    if session["active"] and session["is_resting"]:
-        elapsed   = time.time() - session["rest_start_time"]
-        remaining = int(session["rest_duration"] - elapsed)
+    if sn["active"] and sn["is_resting"]:
+        elapsed   = time.time() - sn["rest_start_time"]
+        remaining = int(sn["rest_duration"] - elapsed)
         if remaining <= 0:
-            session["is_resting"]   = False
-            session["current_set"] += 1
-            session["rep_start_time"] = time.time()
-            reset_state(session["exercise"])
+            sn["is_resting"]   = False
+            sn["current_set"] += 1
+            sn["rep_start_time"] = time.time()
+            reset_state(sn["exercise"], session_id=sess.session_id)
         else:
             cv2.rectangle(frame, (0, 0), (frame.shape[1], frame.shape[0]), (20, 20, 20), -1)
             cv2.putText(frame, "REST TIME",
@@ -926,18 +1086,19 @@ def process_frame(frame):
             cv2.putText(frame, f"{remaining}s",
                         (frame.shape[1] // 2 - 50, frame.shape[0] // 2 + 40),
                         cv2.FONT_HERSHEY_SIMPLEX, 2.5, (0, 255, 0), 4)
-            cv2.putText(frame, session["set_feedback"][:60], (20, frame.shape[0] - 40),
+            cv2.putText(frame, sn["set_feedback"][:60], (20, frame.shape[0] - 40),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 1)
-        return frame, state
+        return frame, st
 
     # ── POSE DETECTION ───────────────────────────────────────────────────────
     try:
         image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         image.flags.writeable = False
-        result = pose.process(image)
+        result = pose_tracker.process(image)
         image.flags.writeable = True
     except Exception:
-        return frame, state
+        logger.exception("MediaPipe pose.process() failed on this frame")
+        return frame, st
 
     if result.pose_landmarks:
         landmarks = result.pose_landmarks.landmark
@@ -951,11 +1112,11 @@ def process_frame(frame):
 
             if 30 < raw_angle < 200:
                 # ── SMOOTHING ─────────────────────────────────────────────
-                state["angle_history"].append(raw_angle)
-                if len(state["angle_history"]) > SMOOTHING_WINDOW:
-                    state["angle_history"].pop(0)
-                angle = sum(state["angle_history"]) / len(state["angle_history"])
-                state["min_angle_this_rep"] = min(state["min_angle_this_rep"], angle)
+                st["angle_history"].append(raw_angle)
+                if len(st["angle_history"]) > SMOOTHING_WINDOW:
+                    st["angle_history"].pop(0)
+                angle = sum(st["angle_history"]) / len(st["angle_history"])
+                st["min_angle_this_rep"] = min(st["min_angle_this_rep"], angle)
                 current_time = time.time()
 
                 # ── FORM CHECKS (every frame) ─────────────────────────────
@@ -964,16 +1125,19 @@ def process_frame(frame):
                 try:
                     metrics    = compute_form_metrics(current_exercise, landmarks)
                     violations = evaluate_form_violations(current_exercise, metrics)
-                    state["form_metrics"]    = metrics
-                    state["form_violations"] = violations
+                    st["form_metrics"]    = metrics
+                    st["form_violations"] = violations
 
-                    hist = state["form_violation_history"]
+                    hist = st["form_violation_history"]
                     hist["_total_frames"] = hist.get("_total_frames", 0) + 1
                     for v in violations:
                         hist[v["check"]] = hist.get(v["check"], 0) + 1
                 except Exception:
-                    state["form_metrics"]    = {}
-                    state["form_violations"] = []
+                    logger.exception(
+                        "Form-check computation failed for exercise=%s", current_exercise
+                    )
+                    st["form_metrics"]    = {}
+                    st["form_violations"] = []
 
                 # ── STATE MACHINE ─────────────────────────────────────────
                 # transition_handled prevents the "update stage" fallback at
@@ -981,72 +1145,72 @@ def process_frame(frame):
                 # same boundary frame.
                 transition_handled = False
 
-                if state["stage"] is None:
+                if st["stage"] is None:
                     if angle > config["up_angle"]:
-                        state["stage"] = "up"
-                        session["rep_start_time"] = current_time
-                        _reset_rep_form_tracking()
+                        st["stage"] = "up"
+                        sn["rep_start_time"] = current_time
+                        _reset_rep_form_tracking(sess)
                         transition_handled = True
 
-                if not transition_handled and state["stage"] == "up" \
+                if not transition_handled and st["stage"] == "up" \
                         and angle < config["down_angle"]:
-                    state["stage"] = "down"
-                    state["last_stage_change_time"] = current_time
+                    st["stage"] = "down"
+                    st["last_stage_change_time"] = current_time
                     transition_handled = True
 
-                elif not transition_handled and state["stage"] == "down" \
+                elif not transition_handled and st["stage"] == "down" \
                         and angle > config["up_angle"]:
 
-                    if current_time - state["last_rep_time"] > state["cooldown"]:
+                    if current_time - st["last_rep_time"] > st["cooldown"]:
                         # ── REP COMPLETED ─────────────────────────────────
-                        state["counter"]               += 1
-                        state["last_rep_time"]          = current_time
-                        state["last_stage_change_time"] = current_time
+                        st["counter"]               += 1
+                        st["last_rep_time"]          = current_time
+                        st["last_stage_change_time"] = current_time
 
-                        state["ai_feedback"] = get_ai_feedback(
-                            state["min_angle_this_rep"], current_exercise, config
+                        st["ai_feedback"] = get_ai_feedback(
+                            st["min_angle_this_rep"], current_exercise, config
                         )
 
-                        if session["active"]:
-                            session["current_set_depths"].append(state["min_angle_this_rep"])
-                            rep_time = current_time - (session["rep_start_time"] or current_time)
-                            session["current_set_rep_times"].append(round(rep_time, 2))
+                        if sn["active"]:
+                            sn["current_set_depths"].append(st["min_angle_this_rep"])
+                            rep_time = current_time - (sn["rep_start_time"] or current_time)
+                            sn["current_set_rep_times"].append(round(rep_time, 2))
 
                             rep_score = compute_rep_form_score(
-                                current_exercise, state["form_violation_history"]
+                                current_exercise, st["form_violation_history"]
                             )
-                            session["current_set_form_scores"].append(rep_score)
-                            session["rep_start_time"] = current_time
+                            sn["current_set_form_scores"].append(rep_score)
+                            sn["rep_start_time"] = current_time
 
-                            if state["counter"] >= session["target_reps"]:
-                                complete_set()
-                                return frame, state
+                            if st["counter"] >= sn["target_reps"]:
+                                complete_set(sess)
+                                return frame, st
 
                     # Reset min-angle and form tracking on any down→up crossing
                     # (whether or not cooldown allowed the rep count).
-                    state["min_angle_this_rep"] = 180
-                    state["stage"]              = "up"
-                    _reset_rep_form_tracking()
+                    st["min_angle_this_rep"] = 180
+                    st["stage"]              = "up"
+                    _reset_rep_form_tracking(sess)
                     transition_handled = True
 
                 if not transition_handled:
                     if angle > config["up_angle"]:
-                        state["stage"] = "up"
+                        st["stage"] = "up"
                     elif angle < config["down_angle"]:
-                        state["stage"] = "down"
+                        st["stage"] = "down"
 
                 # ── MOTION FEEDBACK ───────────────────────────────────────
-                if state["counter"] > 0 and current_time - state["last_rep_time"] > 5:
-                    state["feedback"] = "Let's get moving!"
-                elif state["stage"] == "down" \
-                        and current_time - state["last_stage_change_time"] > 2:
-                    state["feedback"] = "Let's get moving! Push back up!"
-                elif state["stage"] == "up":
-                    state["feedback"] = "Ready"
-                elif state["stage"] == "down":
-                    state["feedback"] = "Good depth"
+                if st["counter"] > 0 and current_time - st["last_rep_time"] > 5:
+                    st["feedback"] = "Let's get moving!"
+                elif st["stage"] == "down" \
+                        and current_time - st["last_stage_change_time"] > 2:
+                    st["feedback"] = "Let's get moving! Push back up!"
+                elif st["stage"] == "up":
+                    st["feedback"] = "Ready"
+                elif st["stage"] == "down":
+                    st["feedback"] = "Good depth"
                 else:
-                    state["feedback"] = "Get in position!"
+                    st["feedback"] = "Get in position!"
 
                 h, w, _ = frame.shape
                 coords = tuple(np.multiply(p2, [w, h]).astype(int))
@@ -1058,24 +1222,24 @@ def process_frame(frame):
         )
 
     # ── FORM CHECK HUD ────────────────────────────────────────────────────
-    _draw_form_hud(frame, current_exercise)
+    _draw_form_hud(frame, current_exercise, sess)
 
     # ── STANDARD OVERLAY ─────────────────────────────────────────────────
     cv2.putText(frame, f'Exercise: {current_exercise}', (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2)
 
-    if session["active"]:
-        cv2.putText(frame, f'Set: {session["current_set"]}/{session["target_sets"]}',
+    if sn["active"]:
+        cv2.putText(frame, f'Set: {sn["current_set"]}/{sn["target_sets"]}',
                     (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-        cv2.putText(frame, f'Reps: {state["counter"]}/{session["target_reps"]}',
+        cv2.putText(frame, f'Reps: {st["counter"]}/{sn["target_reps"]}',
                     (10, 110), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
     else:
-        cv2.putText(frame, f'Reps: {state["counter"]}', (10, 70),
+        cv2.putText(frame, f'Reps: {st["counter"]}', (10, 70),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-    cv2.putText(frame, f'Feedback: {state["feedback"]}', (10, 150),
+    cv2.putText(frame, f'Feedback: {st["feedback"]}', (10, 150),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
-    cv2.putText(frame, f'Trainer: {state["ai_feedback"]}', (10, 190),
+    cv2.putText(frame, f'Trainer: {st["ai_feedback"]}', (10, 190),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
 
-    return frame, state
+    return frame, st

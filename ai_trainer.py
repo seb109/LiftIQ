@@ -1,8 +1,11 @@
-from groq import AsyncGroq
+import logging
 import os
 from dotenv import load_dotenv
+from groq import AsyncGroq
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
 
@@ -24,11 +27,15 @@ Rep durations (seconds): {[round(t,1) for t in session["current_set_rep_times"]]
 Look for depth consistency, pace changes, and whether they hit target reps.
 Give specific actionable feedback like a real trainer would.
 """
-    response = await client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=150
-    )
+    try:
+        response = await client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=150
+        )
+    except Exception:
+        logger.exception("Groq set-feedback call failed")
+        raise
     return response.choices[0].message.content
 
 
@@ -68,9 +75,13 @@ Analyze:
 Format your response naturally like a trainer talking to their client.
 Start with the score like: "Performance Score: X/10"
 """
-    response = await client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=300
-    )
+    try:
+        response = await client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=300
+        )
+    except Exception:
+        logger.exception("Groq session-summary call failed")
+        raise
     return response.choices[0].message.content

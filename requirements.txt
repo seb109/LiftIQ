@@ -1,0 +1,18 @@
+# Dependencies for running the LiftIQ prototype app (main.py / ai_trainer.py /
+# gym_trainer.py) as a service. This is separate from requirements-regression.txt,
+# which only covers the offline CV regression harness.
+
+# Web service
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+jinja2==3.1.5
+python-dotenv==1.0.1
+
+# AI coaching
+groq==0.15.0
+
+# Computer-vision engine (versions pinned identically to requirements-regression.txt)
+mediapipe==0.10.21
+opencv-contrib-python==4.10.0.84
+numpy==1.26.4

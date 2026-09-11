@@ -129,7 +129,7 @@
 
         .video-section { flex: 1; }
 
-        #video-feed {
+        #video-feed, #webcam-canvas {
             width: 100%;
             border-radius: 12px;
             border: 2px solid #00d4ff;
@@ -388,6 +388,11 @@
         <!-- LEFT: Video -->
         <div class="video-section">
             <img id="video-feed" src="" alt="Stream loading...">
+            <!-- Live webcam mode renders here: browser captures its own camera via
+                 getUserMedia() and streams frames to /ws/webcam for processing,
+                 instead of the server opening a camera itself (see ROADMAP.md 1.3). -->
+            <video id="webcam-video" autoplay playsinline muted style="display:none;"></video>
+            <canvas id="webcam-canvas" style="display:none;"></canvas>
 
             <!-- Rest banner shown on top when resting -->
             <div class="rest-banner" id="rest-banner">
@@ -454,6 +459,69 @@
     let statsInterval = null;
     let lastSetCount = 0;
     let sessionComplete = false;
+    let currentSessionId = null;
+
+    // ---- Live webcam capture (browser camera -> WebSocket -> processed frame back) ----
+    let webcamStream = null;
+    let wsWebcam = null;
+    let captureInterval = null;
+
+    async function startWebcamCapture() {
+        const video = document.getElementById('webcam-video');
+        const displayCanvas = document.getElementById('webcam-canvas');
+        document.getElementById('video-feed').style.display = 'none';
+        displayCanvas.style.display = 'block';
+
+        webcamStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = webcamStream;
+        await video.play();
+
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const wsUrl = `${wsProtocol}://${window.location.host}/ws/webcam` + (currentSessionId ? `?session_id=${currentSessionId}` : '');
+        wsWebcam = new WebSocket(wsUrl);
+
+        const grabCanvas = document.createElement('canvas');
+        const grabCtx = grabCanvas.getContext('2d');
+        const displayCtx = displayCanvas.getContext('2d');
+
+        wsWebcam.onopen = () => {
+            captureInterval = setInterval(() => {
+                if (wsWebcam.readyState !== WebSocket.OPEN || !video.videoWidth) return;
+                grabCanvas.width = video.videoWidth;
+                grabCanvas.height = video.videoHeight;
+                grabCtx.drawImage(video, 0, 0, grabCanvas.width, grabCanvas.height);
+                grabCanvas.toBlob(blob => {
+                    if (blob && wsWebcam.readyState === WebSocket.OPEN) {
+                        wsWebcam.send(blob);
+                    }
+                }, 'image/jpeg', 0.8);
+            }, 100); // ~10 fps upstream capture rate
+        };
+
+        wsWebcam.onmessage = (event) => {
+            const blobUrl = URL.createObjectURL(event.data);
+            const img = new Image();
+            img.onload = () => {
+                displayCanvas.width = img.width;
+                displayCanvas.height = img.height;
+                displayCtx.drawImage(img, 0, 0);
+                URL.revokeObjectURL(blobUrl);
+            };
+            img.src = blobUrl;
+        };
+
+        wsWebcam.onerror = (err) => {
+            console.error('Webcam WebSocket error', err);
+        };
+    }
+
+    function stopWebcamCapture() {
+        if (captureInterval) { clearInterval(captureInterval); captureInterval = null; }
+        if (wsWebcam) { wsWebcam.close(); wsWebcam = null; }
+        if (webcamStream) { webcamStream.getTracks().forEach(t => t.stop()); webcamStream = null; }
+        document.getElementById('webcam-canvas').style.display = 'none';
+        document.getElementById('video-feed').style.display = 'block';
+    }
 
     function selectMode(mode) {
         selectedMode = mode;
@@ -472,23 +540,30 @@
         const reps = parseInt(document.getElementById('setup-reps').value);
         const sets = parseInt(document.getElementById('setup-sets').value);
 
-        // start session on backend
-        await fetch('/start_session', {
+        // start session on backend and store returned session_id
+        const res = await fetch('/start_session', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({exercise, target_reps: reps, target_sets: sets})
         });
+        const startData = await res.json();
+        currentSessionId = startData.session_id;
 
         // set up video feed
         if (selectedMode === 'webcam') {
-            document.getElementById('video-feed').src = '/webcam_feed';
+            try {
+                await startWebcamCapture();
+            } catch (err) {
+                alert('Could not access camera: ' + err.message);
+                return;
+            }
         } else {
             const file = document.getElementById('video-file').files[0];
             if (!file) { alert('Please select a video file!'); return; }
             const formData = new FormData();
             formData.append('file', file);
-            await fetch('/upload_video', { method: 'POST', body: formData });
-            document.getElementById('video-feed').src = '/uploaded_feed';
+            await fetch(`/upload_video?session_id=${currentSessionId}`, { method: 'POST', body: formData });
+            document.getElementById('video-feed').src = `/uploaded_feed?session_id=${currentSessionId}`;
         }
 
         document.getElementById('stat-target-reps').textContent = reps;
@@ -504,7 +579,8 @@
     }
 
     async function updateStats() {
-        const res = await fetch('/stats');
+        const url = `/stats` + (currentSessionId ? `?session_id=${currentSessionId}` : '');
+        const res = await fetch(url);
         const data = await res.json();
 
         if (data.session_complete && !sessionComplete) {
@@ -533,7 +609,7 @@
         // trigger groq feedback when new set completes
         if (data.completed_sets && data.completed_sets.length > lastSetCount) {
             lastSetCount = data.completed_sets.length;
-            fetch('/get_set_feedback');
+            fetch(`/get_set_feedback` + (currentSessionId ? `?session_id=${currentSessionId}` : ''));
         }
 
         // update sets tracker
@@ -574,7 +650,8 @@
 
         // poll for summary
         const summaryInterval = setInterval(async () => {
-            const res = await fetch('/stats');
+            const url = `/stats` + (currentSessionId ? `?session_id=${currentSessionId}` : '');
+            const res = await fetch(url);
             const d = await res.json();
             if (d.session_summary) {
                 clearInterval(summaryInterval);
@@ -586,6 +663,15 @@
     }
 
     function newSession() {
+        if (currentSessionId) {
+            fetch('/end_session', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({session_id: currentSessionId})
+            });
+            currentSessionId = null;
+        }
+        stopWebcamCapture();
         document.getElementById('video-feed').src = '';
         showScreen('screen-setup');
     }

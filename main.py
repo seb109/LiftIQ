@@ -1,5 +1,8 @@
+import logging
 import cv2
-from fastapi import FastAPI, UploadFile, File, BackgroundTasks
+import numpy as np
+import uuid
+from fastapi import FastAPI, UploadFile, File, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
@@ -8,16 +11,41 @@ import ai_trainer as ai
 import tempfile
 import os
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+VERSION = "0.1.0"
+
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
-uploaded_video_path = None
+uploaded_video_paths: dict[str, str] = {}
 
 # ----------- PAGES ----------- #
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return templates.TemplateResponse(request, "index.html")
+
+
+# ----------- HEALTH / VERSION ----------- #
+
+@app.get("/health")
+async def health():
+    checks = {"mediapipe_pose_loaded": gt.pose is not None}
+    ok = all(checks.values())
+    return JSONResponse(
+        {"status": "ok" if ok else "error", "checks": checks},
+        status_code=200 if ok else 503,
+    )
+
+
+@app.get("/version")
+async def version():
+    return JSONResponse({"version": VERSION})
 
 
 # ----------- SESSION ----------- #
@@ -27,13 +55,31 @@ async def start_session(data: dict):
     exercise = data.get("exercise", "squat")
     target_reps = int(data.get("target_reps", 10))
     target_sets = int(data.get("target_sets", 3))
-    gt.start_session(exercise, target_reps, target_sets)
+    session_id = data.get("session_id") or uuid.uuid4().hex
+    gt.start_session(exercise, target_reps, target_sets, session_id=session_id)
+    return JSONResponse({"status": "ok", "session_id": session_id})
+
+
+@app.post("/end_session")
+async def end_session(data: dict):
+    session_id = data.get("session_id")
+    if session_id:
+        gt.end_session(session_id)
+        if session_id in uploaded_video_paths:
+            vpath = uploaded_video_paths.pop(session_id, None)
+            if vpath and os.path.exists(vpath):
+                try:
+                    os.remove(vpath)
+                except Exception:
+                    pass
     return JSONResponse({"status": "ok"})
 
 
 @app.get("/stats")
-async def get_stats():
-    s = gt.session
+async def get_stats(session_id: str = None):
+    sess = gt.get_session_state(session_id)
+    st = sess.state
+    s = sess.session
     rest_remaining = 0
     if s["is_resting"] and s["rest_start_time"]:
         import time
@@ -41,11 +87,11 @@ async def get_stats():
 
     return JSONResponse({
         # rep state
-        "counter": gt.state["counter"],
-        "stage": gt.state["stage"],
-        "feedback": gt.state["feedback"],
-        "ai_feedback": gt.state["ai_feedback"],
-        "exercise": gt.state["current_exercise"],
+        "counter": st["counter"],
+        "stage": st["stage"],
+        "feedback": st["feedback"],
+        "ai_feedback": st["ai_feedback"],
+        "exercise": st["current_exercise"],
         # session state
         "session_active": s["active"],
         "session_complete": s["session_complete"],
@@ -57,38 +103,45 @@ async def get_stats():
         "rest_remaining": rest_remaining,
         "set_feedback": s["set_feedback"],
         "session_summary": s["session_summary"],
+        "session_id": sess.session_id,
     })
 
 
 @app.get("/get_set_feedback")
-async def trigger_set_feedback():
+async def trigger_set_feedback(session_id: str = None):
     """Called after a set completes to get Groq feedback"""
-    if gt.session["completed_sets"]:
-        last_set = gt.session["completed_sets"][-1]
+    sess = gt.get_session_state(session_id)
+    s = sess.session
+    if s["completed_sets"]:
+        last_set = s["completed_sets"][-1]
         feedback_session = {
-            "exercise": gt.session["exercise"],
+            "exercise": s["exercise"],
             "current_set": last_set["set_number"],
-            "target_sets": gt.session["target_sets"],
-            "target_reps": gt.session["target_reps"],
+            "target_sets": s["target_sets"],
+            "target_reps": s["target_reps"],
             "current_set_depths": last_set["depths"],
             "current_set_rep_times": last_set["rep_times"],
-            "target_depth": gt.session["target_depth"]
+            "target_depth": s["target_depth"]
         }
-        feedback = await ai.get_set_feedback(feedback_session)
-        gt.session["set_feedback"] = feedback
+        try:
+            feedback = await ai.get_set_feedback(feedback_session)
+        except Exception:
+            logger.exception("Groq set-feedback call failed; continuing without AI feedback")
+            feedback = "Feedback unavailable right now — your set was recorded, keep going."
+        s["set_feedback"] = feedback
 
-        # Use the number of completed sets as the source of truth — not
-        # last_set["set_number"], which depends on current_set being
-        # incremented correctly and is wrong if this endpoint fires more
-        # than once or a set completes outside the rest-timer flow.
         all_sets_done = (
-            len(gt.session["completed_sets"]) >= gt.session["target_sets"]
+            len(s["completed_sets"]) >= s["target_sets"]
         )
-        if all_sets_done and not gt.session["session_complete"]:
-            gt.session["session_complete"] = True
-            gt.session["is_resting"] = False
-            summary = await ai.get_session_summary(gt.session)
-            gt.session["session_summary"] = summary
+        if all_sets_done and not s["session_complete"]:
+            s["session_complete"] = True
+            s["is_resting"] = False
+            try:
+                summary = await ai.get_session_summary(s)
+            except Exception:
+                logger.exception("Groq session-summary call failed; continuing without AI summary")
+                summary = "Session summary unavailable right now — your workout was recorded."
+            s["session_summary"] = summary
 
         return JSONResponse({"feedback": feedback})
     return JSONResponse({"feedback": ""})
@@ -96,16 +149,20 @@ async def trigger_set_feedback():
 
 # ----------- STREAMS ----------- #
 
-def webcam_stream():
+def webcam_stream(session_id: str = None):
     import cv2
     # CAP_DSHOW is required on Windows to avoid silent camera open failures
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    if not cap.isOpened():
+        logger.error("Failed to open webcam (device index 0)")
+        return
     try:
         while True:
             ret, frame = cap.read()
             if not ret:
+                logger.info("Webcam stream ended (no more frames)")
                 break
-            frame, _ = gt.process_frame(frame)
+            frame, _ = gt.process_frame(frame, session_id=session_id)
             _, buffer = cv2.imencode('.jpg', frame)
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
@@ -114,17 +171,47 @@ def webcam_stream():
 
 
 @app.get("/webcam_feed")
-async def webcam_feed():
+async def webcam_feed(session_id: str = None):
     return StreamingResponse(
-        webcam_stream(),
+        webcam_stream(session_id=session_id),
         media_type="multipart/x-mixed-replace;boundary=frame"
     )
 
 
-def video_stream(video_path):
+@app.websocket("/ws/webcam")
+async def ws_webcam(websocket: WebSocket, session_id: str = None):
+    """Receives JPEG frames captured client-side from the browser's own
+    camera, runs them through the gym_trainer engine for session_id, and
+    streams the processed JPEG frames back."""
+    await websocket.accept()
+    try:
+        while True:
+            data = await websocket.receive_bytes()
+            frame_arr = np.frombuffer(data, dtype=np.uint8)
+            frame = cv2.imdecode(frame_arr, cv2.IMREAD_COLOR)
+            if frame is None:
+                logger.warning("ws_webcam: received undecodable frame, skipping")
+                continue
+            processed_frame, _ = gt.process_frame(frame, session_id=session_id)
+            ok, buffer = cv2.imencode('.jpg', processed_frame)
+            if not ok:
+                logger.warning("ws_webcam: failed to encode processed frame, skipping")
+                continue
+            await websocket.send_bytes(buffer.tobytes())
+    except WebSocketDisconnect:
+        logger.info("ws_webcam: client disconnected (session_id=%s)", session_id)
+
+
+def video_stream(video_path: str, session_id: str = None):
     import cv2
     import time
     cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        logger.error("Failed to open uploaded video: %s", video_path)
+        cap.release()
+        if os.path.exists(video_path):
+            os.remove(video_path)
+        return
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
     frame_interval = 1.0 / fps          # target seconds per frame
     try:
@@ -132,14 +219,12 @@ def video_stream(video_path):
             t0 = time.monotonic()
             ret, frame = cap.read()
             if not ret:
+                logger.info("Uploaded video stream ended (no more frames)")
                 break
-            frame, _ = gt.process_frame(frame)
+            frame, _ = gt.process_frame(frame, session_id=session_id)
             _, buffer = cv2.imencode('.jpg', frame)
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
-            # Sleep for whatever time is left in this frame's budget so the
-            # stream plays back at the video's native frame rate instead of
-            # at whatever speed MediaPipe happens to process frames.
             elapsed = time.monotonic() - t0
             sleep_for = frame_interval - elapsed
             if sleep_for > 0:
@@ -147,25 +232,32 @@ def video_stream(video_path):
     finally:
         cap.release()
         if os.path.exists(video_path):
-            os.remove(video_path)
+            try:
+                os.remove(video_path)
+            except Exception:
+                pass
+        if session_id and session_id in uploaded_video_paths:
+            uploaded_video_paths.pop(session_id, None)
 
 
 @app.post("/upload_video")
-async def upload_video(file: UploadFile = File(...)):
-    global uploaded_video_path
+async def upload_video(file: UploadFile = File(...), session_id: str = None):
+    sid = session_id or gt.DEFAULT_SESSION_ID
     suffix = os.path.splitext(file.filename)[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(await file.read())
-        uploaded_video_path = tmp.name
-    gt.reset_state()
-    return JSONResponse({"status": "ok"})
+        uploaded_video_paths[sid] = tmp.name
+    gt.reset_state(session_id=sid)
+    return JSONResponse({"status": "ok", "session_id": sid})
 
 
 @app.get("/uploaded_feed")
-async def uploaded_feed():
-    if not uploaded_video_path:
-        return JSONResponse({"error": "No video uploaded"})
+async def uploaded_feed(session_id: str = None):
+    sid = session_id or gt.DEFAULT_SESSION_ID
+    vpath = uploaded_video_paths.get(sid)
+    if not vpath:
+        return JSONResponse({"error": "No video uploaded for this session"})
     return StreamingResponse(
-        video_stream(uploaded_video_path),
+        video_stream(vpath, session_id=sid),
         media_type="multipart/x-mixed-replace;boundary=frame"
     )

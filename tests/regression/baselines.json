@@ -62,10 +62,10 @@
         60
       ],
       "corrections": {
-        "event_count": 1627,
+        "event_count": 1632,
         "messages": {
-          "Pin your elbow to your side \u2014 don't let it drift!": 811,
-          "Stop swinging \u2014 keep your torso locked!": 816
+          "Pin your elbow to your side \u2014 don't let it drift!": 815,
+          "Stop swinging \u2014 keep your torso locked!": 817
         }
       }
     },
@@ -80,10 +80,10 @@
       "form_score": null,
       "per_rep_form_scores": [],
       "corrections": {
-        "event_count": 652,
+        "event_count": 666,
         "messages": {
-          "Drive your knee over your toe \u2014 it's caving in!": 412,
-          "Keep your chest up \u2014 don't lean forward!": 240
+          "Drive your knee over your toe \u2014 it's caving in!": 418,
+          "Keep your chest up \u2014 don't lean forward!": 248
         }
       }
     },
