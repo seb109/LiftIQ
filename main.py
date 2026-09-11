@@ -11,6 +11,8 @@ import ai_trainer as ai
 import tempfile
 import os
 
+from app.api.v1.router import api_v1_router
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -20,6 +22,7 @@ logger = logging.getLogger(__name__)
 VERSION = "0.1.0"
 
 app = FastAPI()
+app.include_router(api_v1_router)
 templates = Jinja2Templates(directory="templates")
 
 uploaded_video_paths: dict[str, str] = {}

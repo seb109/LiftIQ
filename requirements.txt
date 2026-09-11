@@ -12,7 +12,13 @@ python-dotenv==1.0.1
 # AI coaching
 groq==0.15.0
 
+# Authentication
+python-jose[cryptography]==3.5.0
+passlib[bcrypt]==1.7.4
+bcrypt==3.2.2
+
 # Computer-vision engine (versions pinned identically to requirements-regression.txt)
 mediapipe==0.10.21
 opencv-contrib-python==4.10.0.84
 numpy==1.26.4
+

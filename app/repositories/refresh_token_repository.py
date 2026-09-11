@@ -21,6 +21,13 @@ class RefreshTokenRepository:
             .all()
         )
 
+    def get_by_hash(self, token_hash: str) -> Optional[RefreshToken]:
+        return (
+            self.db.query(RefreshToken)
+            .filter(RefreshToken.token_hash == token_hash)
+            .first()
+        )
+
     def revoke(self, token_id: uuid.UUID) -> bool:
         token = self.db.query(RefreshToken).filter(RefreshToken.id == token_id).first()
         if token:
@@ -28,3 +35,12 @@ class RefreshTokenRepository:
             self.db.commit()
             return True
         return False
+
+    def revoke_by_hash(self, token_hash: str) -> bool:
+        token = self.get_by_hash(token_hash)
+        if token and not token.revoked:
+            token.revoked = True
+            self.db.commit()
+            return True
+        return False
+

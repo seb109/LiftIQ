@@ -2,6 +2,38 @@
 
 ## ✅ Completed Milestones
 
+### Milestone 3: JWT Authentication + User System
+- **Status:** ✅ Complete
+- **Description:** Implemented production-appropriate MVP authentication system using FastAPI, bcrypt password hashing, short-lived JWT access tokens (15-min expiry), persistent hashed refresh tokens (7-day expiry, token rotation upon refresh), user registration/login/refresh/logout endpoints, and reusable `get_current_user` FastAPI dependency.
+- **Authentication Endpoints:**
+  - `POST /api/v1/auth/register`: Validates email and strong password rules, checks duplicate emails, hashes password with bcrypt, and creates User record.
+  - `POST /api/v1/auth/login`: Authenticates credentials against stored bcrypt hash, updates `last_login`, returns short-lived JWT access token and raw refresh token, and persists SHA-256 hash of refresh token.
+  - `POST /api/v1/auth/refresh`: Validates refresh token hash, verifies expiry and revocation, revokes old refresh token (rotation), creates new refresh token, and returns new access + refresh tokens.
+  - `POST /api/v1/auth/logout`: Revokes stored refresh token matching provided token hash.
+  - `GET /api/v1/users/me`: Protected endpoint requiring `Authorization: Bearer <access_token>` returning user profile information.
+- **Files Created/Modified:**
+  - Created `app/core/security.py`: Password hashing/verification using bcrypt (`passlib`), access token creation (`python-jose`), access token decoding, random refresh token generation, and SHA-256 refresh token hashing.
+  - Created `app/schemas/auth.py`: Pydantic models for user registration (email/password validation), login, refresh token requests, user responses, token responses, and API envelope.
+  - Created `app/schemas/__init__.py`: Package exports for Pydantic schemas.
+  - Created `app/api/deps.py`: Reusable `get_current_user` FastAPI dependency extracting Bearer token from headers and verifying user identity.
+  - Created `app/api/v1/endpoints/auth.py`: Auth router implementing `/register`, `/login`, `/refresh`, and `/logout`.
+  - Created `app/api/v1/endpoints/users.py`: User router implementing protected `/users/me` endpoint.
+  - Created `app/api/v1/router.py`: Aggregated v1 API router mounted at `/api/v1`.
+  - Created `tests/test_auth.py`: Complete unit test suite verifying registration, duplicate email rejection, bcrypt password hashing, login, invalid password rejection, JWT claims, protected route dependency, expired/invalid tokens, refresh token rotation, old token invalidation, revoked token rejection, and logout token revocation.
+  - Modified `app/core/config.py`: Added JWT `SECRET_KEY`, `ALGORITHM` (HS256), `ACCESS_TOKEN_EXPIRE_MINUTES` (15), and `REFRESH_TOKEN_EXPIRE_DAYS` (7) settings.
+  - Modified `app/repositories/refresh_token_repository.py`: Added `get_by_hash()` and `revoke_by_hash()` helper methods.
+  - Modified `main.py`: Mounted `api_v1_router` at `/api/v1`.
+  - Modified `requirements.txt`: Added `python-jose[cryptography]`, `passlib[bcrypt]`, and `bcrypt`.
+- **Tests Run & Results:**
+  1. `python -m pytest tests/test_auth.py` $\rightarrow$ **PASS** (12/12 tests passed in 13.47s)
+  2. `python -m pytest tests/test_database.py` $\rightarrow$ **PASS** (6/6 tests passed in 0.77s)
+  3. `python tests/test_session_isolation.py` $\rightarrow$ **PASS** (3/3 tests passed in 0.834s)
+  4. `python tools/regression_baseline.py --verify` $\rightarrow$ **PASS** ("Regression baselines match.")
+- **Known Limitations:**
+  - `get_current_user` dependency is created and tested on `/users/me`; workout endpoints are not yet restricted to authenticated users (planned for Milestone 4).
+
+---
+
 ### Milestone 2: PostgreSQL + SQLAlchemy 2.0 + Alembic Persistence Foundation
 - **Status:** ✅ Complete
 - **Description:** Built a clean persistence layer using SQLAlchemy 2.0, PostgreSQL DDL compatibility, Alembic migrations, and thin Repository pattern for database entities (`User`, `WorkoutSession`, `ExerciseMetric`, `AIReport`, `RefreshToken`).
@@ -75,12 +107,15 @@
 ✅ Alembic initial migration (`001_initial_schema.py`)  
 ✅ Database unit tests (`tests/test_database.py`)  
 
-### Authentication
+### Authentication & User System (Milestone 3)
 
-☐ Register  
-☐ Login  
-☐ JWT  
-☐ Refresh Token  
+✅ Register (`POST /api/v1/auth/register`)  
+✅ Login (`POST /api/v1/auth/login`)  
+✅ JWT Access Token issuance & verification  
+✅ Persistent Refresh Token hashing & rotation (`POST /api/v1/auth/refresh`)  
+✅ Refresh Token revocation & logout (`POST /api/v1/auth/logout`)  
+✅ Protected Profile Endpoint (`GET /api/v1/users/me`)  
+✅ Auth Unit Test Suite (`tests/test_auth.py`)  
 
 ### Dashboard
 
