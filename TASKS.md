@@ -1,5 +1,43 @@
 # Project Progress & Task Checklist
 
+### Milestone 6A: Next.js Frontend Foundation + Authentication UI
+- **Status:** ✅ Complete
+- **Description:** Initialized the Next.js App Router frontend foundation using React 19, TypeScript, Tailwind CSS v4, and a restrained dark aesthetic. Implemented authentication pages (`/login` and `/register`), centralized Axios API client (`src/lib/api.ts`) with automatic Bearer token injection and refresh token rotation, React `AuthContext` state management, `ProtectedRoute` client guard, application shell foundation (`AppShell`), and a comprehensive frontend test runner (`tests/test_auth_ui.ts`).
+- **Frontend Architecture & Components:**
+  - `src/lib/api.ts`: Centralized Axios HTTP client connecting to backend API (`NEXT_PUBLIC_API_URL`). Interceptors handle automatic JWT header injection and 401 refresh token rotation via `POST /api/v1/auth/refresh`.
+  - `src/lib/auth-context.tsx`: Client-side AuthContext managing user session state (`loading`, `authenticated`, `unauthenticated`), bootstrap profile fetch (`/api/v1/users/me`), login, registration, and token invalidation on logout.
+  - `src/lib/providers.tsx`: Top-level wrapper combining TanStack React Query (`QueryClientProvider`) and `AuthProvider`.
+  - UI Primitives (`src/components/ui/`):
+    - `Button`: Primary (electric lime), secondary, outline, ghost, danger variants with loading spinner support.
+    - `Input`: Dark theme input with focus ring (lime-500), label, error message, and password toggle icon.
+    - `Card`: Surface container (`#18181B`) with dark border (`#27272A`), title, description, body, and footer.
+    - `Badge`: Metric & status pills (`lime`, `success`, `warning`, `error`, `neutral`).
+    - `Logo`: Brand treatment for **LiftIQ** ("Intelligent Training Infrastructure").
+    - `LoadingSpinner`: Accessible animated spinner.
+  - Pages & Routing:
+    - `/login`: Polished login form with email/password validation, loading spinner, error banner, and link to `/register`.
+    - `/register`: Polished registration form with name/email validation, password complexity checklist, confirm password check, error banner, and link to `/login`.
+    - `/`: Authenticated AppShell home layout protected by `ProtectedRoute`. Displays welcome greeting, user identity claims, token system status, and backend integration status.
+- **Visual Design System:**
+  - Primary Background: Deep Charcoal (`#09090B`)
+  - Primary Surface: Dark Graphite (`#111827` / `#18181B`)
+  - Accent Color: Controlled Electric/Acid Lime (`#A3E635` / `lime-400`), used strictly for primary CTA, active badges, and highlights.
+  - Primary Text: Warm White (`#F8FAFC`)
+  - Secondary Text: Muted Slate (`#94A3B8`)
+- **Tests Run & Results:**
+  1. `npm test` (inside `frontend/`) $\rightarrow$ **PASS** (All 5 frontend test suites passed in `tests/test_auth_ui.ts` covering API config, token storage, validation rules, 15 required file structures, and zero hardcoded secrets).
+  2. `npm run build` (inside `frontend/`) $\rightarrow$ **PASS** (Next.js 16.3.5 webpack production build completed with zero TypeScript or linting errors).
+  3. `python -m pytest tests/test_auth.py` $\rightarrow$ **PASS** (12/12 passed)
+  4. `python -m pytest tests/test_database.py` $\rightarrow$ **PASS** (6/6 passed)
+  5. `python -m pytest tests/test_workout_lifecycle.py` $\rightarrow$ **PASS** (8/8 passed)
+  6. `python -m pytest tests/test_ai_reports.py` $\rightarrow$ **PASS** (8/8 passed)
+  7. `python tests/test_session_isolation.py` $\rightarrow$ **PASS** (3/3 passed)
+  8. `python tools/regression_baseline.py --verify` $\rightarrow$ **PASS** ("Regression baselines match.")
+- **Known Limitations:**
+  - Milestone 6A focuses exclusively on Next.js foundation & Auth UI. Interactive Dashboard, Webcam/Pose UI, Exercise Selector, History, and AI Report UI are planned for Milestone 6B.
+
+---
+
 ### Milestone 5: Structured AI Workout Reports + PostgreSQL Persistence
 - **Status:** ✅ Complete
 - **Description:** Implemented structured post-workout AI coaching reports integrated with the existing Groq LLM client (`llama-3.1-8b-instant`), strict Pydantic schema validation, 1 retry attempt upon schema mismatch, deterministic safe metric-based fallback report (no medical claims or injury diagnoses), idempotent single-report persistence in PostgreSQL, and authenticated user report retrieval endpoints with user ownership enforcement.
