@@ -6,6 +6,13 @@ from app.schemas.auth import (
     TokenResponseData,
     APIResponse,
 )
+from app.schemas.session import (
+    StartSessionRequest,
+    EndSessionRequest,
+    WorkoutSessionResponse,
+    WorkoutSessionDetailResponse,
+    ExerciseMetricResponse,
+)
 
 __all__ = [
     "UserRegisterRequest",
@@ -14,4 +21,9 @@ __all__ = [
     "UserResponseData",
     "TokenResponseData",
     "APIResponse",
+    "StartSessionRequest",
+    "EndSessionRequest",
+    "WorkoutSessionResponse",
+    "WorkoutSessionDetailResponse",
+    "ExerciseMetricResponse",
 ]
