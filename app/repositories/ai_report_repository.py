@@ -14,5 +14,9 @@ class AIReportRepository:
         self.db.refresh(report)
         return report
 
+    def get_by_id(self, report_id: uuid.UUID) -> Optional[AIReport]:
+        return self.db.query(AIReport).filter(AIReport.id == report_id).first()
+
     def get_by_session_id(self, session_id: uuid.UUID) -> Optional[AIReport]:
         return self.db.query(AIReport).filter(AIReport.session_id == session_id).first()
+

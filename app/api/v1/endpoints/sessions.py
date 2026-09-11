@@ -88,26 +88,26 @@ def start_workout_session(
 
 
 @router.post("/{session_id}/stop", status_code=status.HTTP_200_OK)
-def stop_workout_session_path(
+async def stop_workout_session_path(
     session_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Stop/complete an authenticated workout session by path session_id."""
-    return _process_end_session(session_id, current_user, db)
+    return await _process_end_session(session_id, current_user, db)
 
 
 @router.post("/stop", status_code=status.HTTP_200_OK)
-def stop_workout_session_body(
+async def stop_workout_session_body(
     session_id: str = Query(..., description="Session UUID string"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Stop/complete an authenticated workout session by query session_id."""
-    return _process_end_session(session_id, current_user, db)
+    return await _process_end_session(session_id, current_user, db)
 
 
-def _process_end_session(session_id_str: str, current_user: User, db: Session):
+async def _process_end_session(session_id_str: str, current_user: User, db: Session):
     """Helper to finalize workout session, aggregate metrics, and persist to DB."""
     try:
         session_uuid = uuid.UUID(session_id_str)
@@ -195,17 +195,31 @@ def _process_end_session(session_id_str: str, current_user: User, db: Session):
     # Clean up in-memory session
     gt.end_session(session_id_str)
 
+    # Attempt AI report generation AFTER workout completion transaction
+    from app.services.ai_service import generate_and_persist_ai_report
+    report_id_str = None
+    try:
+        report = await generate_and_persist_ai_report(db, session_entity, completed_sets)
+        report_id_str = str(report.id)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("AI report generation encountered an error; workout remains completed.")
+
+    resp_data = {
+        "session_id": session_id_str,
+        "exercise": session_entity.exercise,
+        "total_reps": total_reps,
+        "duration_seconds": duration,
+        "average_form_score": avg_form_score,
+        "ended_at": now.isoformat()
+    }
+    if report_id_str:
+        resp_data["report_id"] = report_id_str
+
     return APIResponse(
         success=True,
         message="Workout completed.",
-        data={
-            "session_id": session_id_str,
-            "exercise": session_entity.exercise,
-            "total_reps": total_reps,
-            "duration_seconds": duration,
-            "average_form_score": avg_form_score,
-            "ended_at": now.isoformat()
-        }
+        data=resp_data
     )
 
 

@@ -8,9 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 from main import app
 from app.db.session import get_db
-from app.models.base import Base
-from app.models.user import User
-from app.models.refresh_token import RefreshToken
+from app.models import Base, User, RefreshToken, WorkoutSession, ExerciseMetric, AIReport
 from app.core.security import (
     create_access_token,
     decode_access_token,

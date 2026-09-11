@@ -13,6 +13,11 @@ from app.schemas.session import (
     WorkoutSessionDetailResponse,
     ExerciseMetricResponse,
 )
+from app.schemas.report import (
+    AIReportStructuredSchema,
+    GenerateReportRequest,
+    AIReportResponseData,
+)
 
 __all__ = [
     "UserRegisterRequest",
@@ -26,4 +31,7 @@ __all__ = [
     "WorkoutSessionResponse",
     "WorkoutSessionDetailResponse",
     "ExerciseMetricResponse",
+    "AIReportStructuredSchema",
+    "GenerateReportRequest",
+    "AIReportResponseData",
 ]
