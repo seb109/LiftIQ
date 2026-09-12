@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/protected-route';
 import { AppShell } from '@/components/app-shell';
 import { useAuth } from '@/lib/auth-context';
@@ -15,6 +16,7 @@ import { CoachInsight } from '@/components/dashboard/coach-insight';
 import { DashboardSkeleton } from '@/components/dashboard/dashboard-skeleton';
 
 function DashboardContent() {
+  const router = useRouter();
   const { user } = useAuth();
   const { data, isLoading, isError, error, refetch } = useDashboardData();
 
@@ -47,8 +49,7 @@ function DashboardContent() {
   }
 
   const handleStartWorkout = () => {
-    // Workout studio flow will be integrated in Milestone 6C
-    alert('Start Workout feature will launch in the upcoming Workout Studio milestone!');
+    router.push('/workout');
   };
 
   return (

@@ -39,7 +39,8 @@ export default function RegisterPage() {
   const hasUpper = /[A-Z]/.test(password);
   const hasLower = /[a-z]/.test(password);
   const hasNumber = /[0-9]/.test(password);
-  const isPasswordValid = hasMinLength && hasUpper && hasLower && hasNumber;
+  const hasSpecial = /[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(password);
+  const isPasswordValid = hasMinLength && hasUpper && hasLower && hasNumber && hasSpecial;
 
   const validate = (): boolean => {
     const errors: typeof fieldErrors = {};
@@ -183,6 +184,10 @@ export default function RegisterPage() {
                   <div className={`flex items-center gap-1.5 ${hasNumber ? 'text-lime-400' : 'text-slate-500'}`}>
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     <span>Number</span>
+                  </div>
+                  <div className={`flex items-center gap-1.5 ${hasSpecial ? 'text-lime-400' : 'text-slate-500'}`}>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Special character</span>
                   </div>
                 </div>
               </div>

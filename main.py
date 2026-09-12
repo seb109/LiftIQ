@@ -11,6 +11,7 @@ import ai_trainer as ai
 import tempfile
 import os
 
+from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.router import api_v1_router
 logging.basicConfig(
     level=logging.INFO,
@@ -21,7 +22,22 @@ logger = logging.getLogger(__name__)
 VERSION = "0.1.0"
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(api_v1_router)
+
 
 @app.on_event("startup")
 def on_startup():
@@ -98,6 +114,15 @@ async def get_stats(session_id: str = None):
         import time
         rest_remaining = max(0, int(s["rest_duration"] - (time.time() - s["rest_start_time"])))
 
+    # Build live form violations list: [{check, value, message}]
+    raw_violations = st.get("form_violations", [])
+    form_violation_messages = [v.get("message", "") for v in raw_violations if v.get("message")]
+    # Current rep form score (0–100), None before first rep
+    form_score = None
+    completed = s.get("completed_sets", [])
+    if completed and completed[-1].get("form_scores"):
+        form_score = completed[-1]["form_scores"][-1]
+
     return JSONResponse({
         # rep state
         "counter": st["counter"],
@@ -105,6 +130,9 @@ async def get_stats(session_id: str = None):
         "feedback": st["feedback"],
         "ai_feedback": st["ai_feedback"],
         "exercise": st["current_exercise"],
+        # live form data (new in 6C)
+        "form_violations": form_violation_messages,
+        "form_score": form_score,
         # session state
         "session_active": s["active"],
         "session_complete": s["session_complete"],

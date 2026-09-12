@@ -1,5 +1,30 @@
 # Project Progress & Task Checklist
 
+### Milestone 6C: Live Workout Experience
+- **Status:** ✅ Complete
+- **Description:** Implemented the full browser-based live workout experience connecting the existing MediaPipe/OpenCV CV engine to a polished frontend. Backend `/stats` endpoint extended with `form_violations` and `form_score` (additive). New frontend pages and hooks manage camera access (`getUserMedia`), WebSocket ping-pong frame streaming to `/ws/webcam`, stats polling at 800ms intervals, elapsed timer, exercise setup, live view with annotated camera canvas, form coaching bar, and post-session completion screen with real backend data.
+- **Architecture:**
+  - `main.py`: Extended `/stats` response with `form_violations` (live correction messages from CV engine) and `form_score` (current rep 0–100 score).
+  - `src/lib/api.ts`: Added `WorkoutStats`, `StartSessionResponse`, `StopSessionResponse` interfaces and `startWorkoutSession`, `stopWorkoutSession`, `getWorkoutStats` API functions.
+  - `src/lib/use-workout-session.ts`: Core hook encapsulating camera lifecycle (getUserMedia, track cleanup on unmount), WebSocket ping-pong frame loop, 800ms stats polling, elapsed timer, session start/stop API calls, pause/resume, and reconnect logic (3 attempts).
+  - `src/components/workout/workout-setup.tsx`: Exercise selection (6 cards matching backend canonical IDs), reps/sets configuration, camera notice, and Start Workout CTA.
+  - `src/components/workout/live-workout-view.tsx`: Camera-hero layout. Desktop: annotated canvas (left) + stats sidebar (right). Mobile: full-width camera with overlay quick-stats, coaching bar + controls in sticky bottom bar.
+  - `src/components/workout/stats-panel.tsx`: Reps, set progress, animated SVG form-score ring (colour-coded: lime ≥80, amber ≥60, red <60), and duration timer.
+  - `src/components/workout/coaching-bar.tsx`: Displays real CV `form_violations` with 1.2s debounce, falls back to rep feedback, then neutral state. Red highlight on violation.
+  - `src/components/workout/connection-status.tsx`: Status pill (IDLE / CONNECTING / LIVE / PAUSED / RECONNECTING / STOPPING / COMPLETED / ERROR).
+  - `src/components/workout/end-workout-dialog.tsx`: Confirmation dialog guarding accidental termination.
+  - `src/components/workout/workout-complete-view.tsx`: Completion screen with real `total_reps`, `duration_seconds`, `average_form_score` from backend. Colour-coded form score. AI report notice.
+  - `src/components/workout/camera-permission-error.tsx`: Camera denied/unavailable state with retry action.
+  - `src/app/workout/page.tsx`: Protected route, orchestrates setup → live → complete state machine.
+  - `src/app/page.tsx`: "Start Workout" CTA now navigates to `/workout` (replaces alert placeholder).
+- **Tests Run & Results:**
+  1. `npm test` → **PASS** (22 tests: 5 auth + 4 dashboard + 13 workout; all passed including exercise ID matching, API functions, hook constants, camera cleanup, ping-pong frame control, dialog safety, real backend field usage, and dashboard navigation).
+  2. `npm run build` → **PASS** (TypeScript clean; `/workout` route appears in route table).
+  3. `python -m pytest tests/ -v` → **PASS** (All backend tests passed).
+  4. `python tools/regression_baseline.py --verify` → **PASS**.
+
+---
+
 ### Milestone 6B: LiftIQ Authenticated Dashboard & Data Integration
 - **Status:** ✅ Complete
 - **Description:** Implemented the authenticated Dashboard landing page for LiftIQ using real backend data (`GET /api/v1/users/me`, `GET /api/v1/sessions`, and `GET /api/v1/reports`). Prioritized a polished, functional fitness dashboard using TanStack React Query for server state management, robust zero-state empty handling, and strict design language compliance (deep charcoal background `#09090B`, graphite surface `#18181B`, warm white primary typography, muted slate secondary text, and acid lime `#A3E635` accents). Zero fake or hardcoded mock statistics.

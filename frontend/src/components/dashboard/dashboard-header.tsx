@@ -22,7 +22,7 @@ export function DashboardHeader({ user, onStartWorkout }: DashboardHeaderProps) 
   return (
     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-6 bg-zinc-900/80 border border-zinc-800 rounded-xl backdrop-blur-sm">
       <div className="space-y-1">
-        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-50">
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-50" suppressHydrationWarning>
           {userName ? `${greeting}, ${userName}` : `${greeting}`}
         </h1>
         <p className="text-sm text-zinc-400">

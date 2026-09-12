@@ -239,3 +239,76 @@ export const reportsApi = {
   },
 };
 
+// ── Workout session management (Milestone 6C) ────────────────────────────────
+
+export interface StartSessionResponse {
+  session_id: string;
+  started_at: string;
+  exercise: string;
+}
+
+export interface StopSessionResponse {
+  session_id: string;
+  exercise: string;
+  total_reps: number;
+  duration_seconds: number;
+  average_form_score: number | null;
+  ended_at: string;
+  report_id?: string;
+}
+
+/** Live stats returned by GET /stats?session_id=<uuid> */
+export interface WorkoutStats {
+  counter: number;
+  stage: string | null;
+  feedback: string;
+  ai_feedback: string;
+  exercise: string;
+  form_violations: string[];
+  form_score: number | null;
+  session_active: boolean;
+  session_complete: boolean;
+  current_set: number;
+  target_sets: number;
+  target_reps: number;
+  completed_sets: unknown[];
+  is_resting: boolean;
+  rest_remaining: number;
+  set_feedback: string;
+  session_summary: string;
+  session_id: string;
+}
+
+/** Start an authenticated workout session via the v1 API. */
+export const startWorkoutSession = async (
+  exercise: string,
+  targetReps: number,
+  targetSets: number,
+): Promise<StartSessionResponse> => {
+  const res = await apiClient.post<APIResponse<StartSessionResponse>>('/api/v1/sessions/start', {
+    exercise,
+    target_reps: targetReps,
+    target_sets: targetSets,
+  });
+  if (!res.data.success || !res.data.data) {
+    throw new Error(res.data.message || 'Failed to start workout session');
+  }
+  return res.data.data;
+};
+
+/** Stop/finalize an authenticated workout session. */
+export const stopWorkoutSession = async (sessionId: string): Promise<StopSessionResponse> => {
+  const res = await apiClient.post<APIResponse<StopSessionResponse>>(`/api/v1/sessions/${sessionId}/stop`);
+  if (!res.data.success || !res.data.data) {
+    throw new Error(res.data.message || 'Failed to stop workout session');
+  }
+  return res.data.data;
+};
+
+/** Poll live CV stats from the legacy /stats endpoint (no auth required). */
+export const getWorkoutStats = async (sessionId: string): Promise<WorkoutStats> => {
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  const res = await fetch(`${baseUrl}/stats?session_id=${sessionId}`);
+  if (!res.ok) throw new Error('Failed to fetch workout stats');
+  return res.json() as Promise<WorkoutStats>;
+};
