@@ -4,109 +4,85 @@ import React from 'react';
 import { ProtectedRoute } from '@/components/protected-route';
 import { AppShell } from '@/components/app-shell';
 import { useAuth } from '@/lib/auth-context';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { ShieldCheck, UserCheck, Cpu, ArrowRight } from 'lucide-react';
+import { useDashboardData } from '@/lib/use-dashboard-data';
+import { DashboardHeader } from '@/components/dashboard/dashboard-header';
+import { DashboardStats } from '@/components/dashboard/dashboard-stats';
+import { RecentWorkout } from '@/components/dashboard/recent-workout';
+import { PerformanceChart } from '@/components/dashboard/performance-chart';
+import { ExerciseBreakdown } from '@/components/dashboard/exercise-breakdown';
+import { RecentActivity } from '@/components/dashboard/recent-activity';
+import { CoachInsight } from '@/components/dashboard/coach-insight';
+import { DashboardSkeleton } from '@/components/dashboard/dashboard-skeleton';
+
+function DashboardContent() {
+  const { user } = useAuth();
+  const { data, isLoading, isError, error, refetch } = useDashboardData();
+
+  if (isLoading) {
+    return <DashboardSkeleton />;
+  }
+
+  if (isError) {
+    return (
+      <div className="p-6 bg-zinc-900 border border-rose-900/50 rounded-xl space-y-4 text-center max-w-xl mx-auto my-8">
+        <div className="p-3 bg-rose-950/50 rounded-full w-12 h-12 flex items-center justify-center mx-auto text-rose-400">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        </div>
+        <div className="space-y-1">
+          <h3 className="text-base font-semibold text-zinc-100">Failed to load dashboard data</h3>
+          <p className="text-xs text-zinc-400">
+            {error?.message || 'An unexpected error occurred while communicating with the server.'}
+          </p>
+        </div>
+        <button
+          onClick={() => refetch()}
+          className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold text-xs rounded-lg transition-colors border border-zinc-700"
+        >
+          Try Again
+        </button>
+      </div>
+    );
+  }
+
+  const handleStartWorkout = () => {
+    // Workout studio flow will be integrated in Milestone 6C
+    alert('Start Workout feature will launch in the upcoming Workout Studio milestone!');
+  };
+
+  return (
+    <div className="space-y-6 max-w-6xl mx-auto pb-10">
+      {/* Header / Welcome */}
+      <DashboardHeader user={user} onStartWorkout={handleStartWorkout} />
+
+      {/* KPI Metrics Grid */}
+      <DashboardStats kpis={data.kpis} />
+
+      {/* Main Grid Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left 2 Columns */}
+        <div className="lg:col-span-2 space-y-6">
+          <RecentWorkout session={data.recentWorkout} onStartWorkout={handleStartWorkout} />
+          <PerformanceChart points={data.trendPoints} />
+          <RecentActivity sessions={data.recentActivity} />
+        </div>
+
+        {/* Right 1 Column */}
+        <div className="space-y-6">
+          <CoachInsight report={data.latestReport} />
+          <ExerciseBreakdown distribution={data.exerciseDistribution} />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function HomePage() {
-  const { user } = useAuth();
-
   return (
     <ProtectedRoute>
       <AppShell>
-        <div className="space-y-8 max-w-4xl mx-auto">
-          {/* Welcome Header */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800/80 pb-6">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <Badge variant="lime">Authenticated Shell</Badge>
-                <Badge variant="neutral">Milestone 6A</Badge>
-              </div>
-              <h1 className="text-3xl font-extrabold tracking-tight text-slate-50">
-                Welcome, {user?.name || 'Athlete'}
-              </h1>
-              <p className="text-slate-400 text-sm mt-1">
-                Your authenticated session is active and token telemetry is synced with the LiftIQ backend engine.
-              </p>
-            </div>
-          </div>
-
-          {/* Infrastructure Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Card variant="elevated" className="border-zinc-800 bg-zinc-900/80">
-              <CardHeader className="flex flex-row items-center gap-3">
-                <div className="p-2.5 rounded-xl bg-lime-400/10 border border-lime-400/20 text-lime-400">
-                  <UserCheck className="w-5 h-5" />
-                </div>
-                <div>
-                  <CardTitle className="text-lg">Identity & Session State</CardTitle>
-                  <CardDescription>JWT Access & Refresh Token System</CardDescription>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm text-slate-300">
-                <div className="flex items-center justify-between py-2 border-b border-zinc-800/60">
-                  <span className="text-slate-400">User ID:</span>
-                  <span className="font-mono text-xs text-slate-200 bg-zinc-950 px-2 py-1 rounded border border-zinc-800">{user?.id || '—'}</span>
-                </div>
-                <div className="flex items-center justify-between py-2 border-b border-zinc-800/60">
-                  <span className="text-slate-400">Account Email:</span>
-                  <span className="font-mono text-xs text-slate-200">{user?.email || '—'}</span>
-                </div>
-                <div className="flex items-center justify-between py-2">
-                  <span className="text-slate-400">Auth Token Rotation:</span>
-                  <Badge variant="success">Active</Badge>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card variant="elevated" className="border-zinc-800 bg-zinc-900/80">
-              <CardHeader className="flex flex-row items-center gap-3">
-                <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
-                  <Cpu className="w-5 h-5" />
-                </div>
-                <div>
-                  <CardTitle className="text-lg">Backend Integration</CardTitle>
-                  <CardDescription>FastAPI REST Engine Status</CardDescription>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm text-slate-300">
-                <div className="flex items-center justify-between py-2 border-b border-zinc-800/60">
-                  <span className="text-slate-400">Backend API URL:</span>
-                  <span className="font-mono text-xs text-slate-200">{process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}</span>
-                </div>
-                <div className="flex items-center justify-between py-2 border-b border-zinc-800/60">
-                  <span className="text-slate-400">REST Endpoints:</span>
-                  <span className="font-mono text-xs text-slate-200">/api/v1/auth & /api/v1/users</span>
-                </div>
-                <div className="flex items-center justify-between py-2">
-                  <span className="text-slate-400">State Guard:</span>
-                  <Badge variant="lime">Enforced</Badge>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Next Milestone Note */}
-          <Card variant="bordered" className="border-zinc-800 bg-zinc-950/60 p-6">
-            <div className="flex items-start gap-4">
-              <div className="p-2.5 rounded-xl bg-zinc-800 border border-zinc-700 text-lime-400 shrink-0">
-                <ShieldCheck className="w-6 h-6" />
-              </div>
-              <div className="space-y-2">
-                <h4 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                  Milestone 6A Foundation Complete
-                </h4>
-                <p className="text-sm text-slate-400 leading-relaxed">
-                  Next.js App Router, Tailwind CSS design system, JWT token lifecycle management, protected routing, and authentication UI (Login/Register) are fully operational.
-                </p>
-                <div className="pt-2 text-xs font-mono text-slate-400 flex items-center gap-1">
-                  <span>Upcoming: Milestone 6B — Interactive Dashboard & Real-Time Workout Studio</span>
-                  <ArrowRight className="w-3.5 h-3.5 text-lime-400 ml-1 inline" />
-                </div>
-              </div>
-            </div>
-          </Card>
-        </div>
+        <DashboardContent />
       </AppShell>
     </ProtectedRoute>
   );

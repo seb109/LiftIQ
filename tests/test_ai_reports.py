@@ -11,9 +11,8 @@ from sqlalchemy.pool import StaticPool
 from main import app
 import gym_trainer as gt
 from app.db.session import get_db
-from app.models.base import Base
-from app.models.ai_report import AIReport
-from app.models.workout_session import WorkoutSession
+from app.models import Base, User, RefreshToken, WorkoutSession, ExerciseMetric, AIReport
+
 from app.services.ai_service import (
     build_compact_workout_input,
     generate_fallback_report,
@@ -45,10 +44,17 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def setup_db():
+    app.dependency_overrides[get_db] = override_get_db
     Base.metadata.create_all(bind=engine)
     yield
-    Base.metadata.drop_all(bind=engine)
+    db = TestingSessionLocal()
+    for table in reversed(Base.metadata.sorted_tables):
+        db.execute(table.delete())
+    db.commit()
+    db.close()
     gt._sessions.clear()
+
+
 
 
 def register_and_get_token(email: str, name: str = "Test User") -> dict:

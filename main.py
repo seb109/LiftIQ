@@ -12,7 +12,6 @@ import tempfile
 import os
 
 from app.api.v1.router import api_v1_router
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -23,7 +22,18 @@ VERSION = "0.1.0"
 
 app = FastAPI()
 app.include_router(api_v1_router)
+
+@app.on_event("startup")
+def on_startup():
+    try:
+        from app.db.session import engine
+        from app.models import Base
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        logger.warning(f"Database table creation on startup skipped or failed: {e}")
+
 templates = Jinja2Templates(directory="templates")
+
 
 uploaded_video_paths: dict[str, str] = {}
 

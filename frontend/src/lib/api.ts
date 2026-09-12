@@ -191,3 +191,51 @@ export const authApi = {
     return res.data.data;
   },
 };
+
+export interface WorkoutSessionItem {
+  id: string;
+  exercise: string;
+  started_at: string | null;
+  ended_at: string | null;
+  duration_seconds: number | null;
+  total_reps: number;
+  average_form_score: number | null;
+  status: string;
+}
+
+export interface AIReportItem {
+  id: string;
+  session_id: string;
+  overall_score: number | null;
+  form_score: number | null;
+  strengths: string[];
+  mistakes: string[];
+  improvements: string[];
+  coach_summary: string | null;
+  next_session_focus: string | null;
+  motivation: string | null;
+  report_markdown: string | null;
+  model_name: string | null;
+  created_at: string | null;
+}
+
+export const sessionsApi = {
+  getSessions: async (limit = 50): Promise<WorkoutSessionItem[]> => {
+    const res = await apiClient.get<APIResponse<{ items: WorkoutSessionItem[]; count: number }>>(`/api/v1/sessions?limit=${limit}`);
+    if (!res.data.success || !res.data.data) {
+      throw new Error(res.data.message || 'Failed to fetch workout sessions');
+    }
+    return res.data.data.items || [];
+  },
+};
+
+export const reportsApi = {
+  getReports: async (limit = 50): Promise<AIReportItem[]> => {
+    const res = await apiClient.get<APIResponse<{ items: AIReportItem[]; count: number }>>(`/api/v1/reports?limit=${limit}`);
+    if (!res.data.success || !res.data.data) {
+      throw new Error(res.data.message || 'Failed to fetch AI reports');
+    }
+    return res.data.data.items || [];
+  },
+};
+

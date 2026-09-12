@@ -7,7 +7,7 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx tests/test_auth_ui.ts"
+    "test": "tsx tests/test_auth_ui.ts && tsx tests/test_dashboard_ui.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.102.8",
