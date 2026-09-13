@@ -18,17 +18,20 @@ export const STATS_POLL_INTERVAL_MS = 800;
 /** JPEG quality for frames sent to backend (0–1). */
 export const FRAME_JPEG_QUALITY = 0.7;
 
-/** WebSocket base URL (ws:// not http://). */
+/** Delay between consecutive frame sends in ms (rate-limit to ~10 fps max). */
+const FRAME_INTERVAL_MS = 100;
+
+/** WebSocket base URL derived from the API URL env var (ws:// not http://). */
 const WS_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000')
-  .replace(/^http/, 'ws');
+  .replace(/^https?/, (m) => (m === 'https' ? 'wss' : 'ws'));
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type ConnectionState =
   | 'IDLE'
   | 'CONNECTING'
-  | 'READY'
-  | 'LIVE'
+  | 'READY'       // camera ready, WS not yet open
+  | 'LIVE'        // WS open, frames flowing
   | 'PAUSED'
   | 'RECONNECTING'
   | 'STOPPING'
@@ -43,26 +46,58 @@ export interface WorkoutSession {
   startedAt: string;
 }
 
+/** Specific camera error types. */
+export type CameraErrorReason =
+  | 'NotAllowedError'
+  | 'NotFoundError'
+  | 'NotReadableError'
+  | 'OverconstrainedError'
+  | 'SecurityError'
+  | 'UnsupportedBrowser'
+  | 'Unknown';
+
 export interface UseWorkoutSessionReturn {
-  // Session
   session: WorkoutSession | null;
   connectionState: ConnectionState;
-  // Live CV stats
   stats: WorkoutStats | null;
   elapsedSeconds: number;
-  // Completion data
   completionData: StopSessionResponse | null;
-  // Errors
   startError: string | null;
+  cameraErrorReason: CameraErrorReason | null;
   stopError: string | null;
-  // Actions
+  stream: MediaStream | null;                                // exposed so LiveWorkoutView can attach it
   startSession: (exercise: string, targetReps: number, targetSets: number) => Promise<void>;
   endSession: () => Promise<void>;
   togglePause: () => void;
   clearErrors: () => void;
-  // Refs for camera
-  videoRef: React.RefObject<HTMLVideoElement | null>;
   annotatedCanvasRef: React.RefObject<HTMLCanvasElement | null>;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function classifyDOMException(err: unknown): CameraErrorReason {
+  if (typeof window === 'undefined') return 'UnsupportedBrowser';
+  if (!(err instanceof DOMException)) return 'Unknown';
+  switch (err.name) {
+    case 'NotAllowedError':       return 'NotAllowedError';
+    case 'NotFoundError':         return 'NotFoundError';
+    case 'NotReadableError':      return 'NotReadableError';
+    case 'OverconstrainedError':  return 'OverconstrainedError';
+    case 'SecurityError':         return 'SecurityError';
+    default:                      return 'Unknown';
+  }
+}
+
+function cameraErrorMessage(reason: CameraErrorReason): string {
+  switch (reason) {
+    case 'NotAllowedError':      return 'Camera permission denied. Please allow camera access in your browser and try again.';
+    case 'NotFoundError':        return 'No camera was found. Please connect a webcam and try again.';
+    case 'NotReadableError':     return 'Camera is already in use by another application. Please close it and try again.';
+    case 'OverconstrainedError': return 'Camera does not meet the required constraints. Try a different camera.';
+    case 'SecurityError':        return 'Camera access is blocked by your browser security policy. Ensure you are on localhost or HTTPS.';
+    case 'UnsupportedBrowser':   return 'Your browser does not support camera access. Please use Chrome, Firefox, or Edge.';
+    default:                     return 'Failed to access camera. Please check your camera and browser permissions.';
+  }
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
@@ -74,157 +109,210 @@ export function useWorkoutSession(): UseWorkoutSessionReturn {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [completionData, setCompletionData] = useState<StopSessionResponse | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
+  const [cameraErrorReason, setCameraErrorReason] = useState<CameraErrorReason | null>(null);
   const [stopError, setStopError] = useState<string | null>(null);
+  // Exposed MediaStream so LiveWorkoutView can attach it to the <video> element itself
+  const [stream, setStream] = useState<MediaStream | null>(null);
 
-  // Camera / canvas refs
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  // Annotated canvas ref (populated by LiveWorkoutView)
   const annotatedCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Internal refs (not causing re-renders)
-  const wsRef = useRef<WebSocket | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const captureCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const rafRef = useRef<number | null>(null);
-  const statsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const sessionRef = useRef<WorkoutSession | null>(null);
-  const pausedRef = useRef(false);
-  const awaitingFrameRef = useRef(false); // ping-pong frame control
-  const startedAtRef = useRef<Date | null>(null);
-  const stoppingRef = useRef(false);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Internal refs — never trigger re-renders
+  const wsRef                = useRef<WebSocket | null>(null);
+  const streamRef            = useRef<MediaStream | null>(null);
+  const captureCanvasRef     = useRef<HTMLCanvasElement | null>(null);
+  const statsIntervalRef     = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerIntervalRef     = useRef<ReturnType<typeof setInterval> | null>(null);
+  const frameTimerRef        = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionRef           = useRef<WorkoutSession | null>(null);
+  const pausedRef            = useRef(false);
+  const awaitingFrameRef     = useRef(false);
+  const stoppingRef          = useRef(false);
+  const reconnectTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
+  const frameLoopActiveRef   = useRef(false);
 
   // Keep sessionRef in sync
   useEffect(() => { sessionRef.current = session; }, [session]);
 
-  // ── Camera ──────────────────────────────────────────────────────────────────
+  // ── Camera ───────────────────────────────────────────────────────────────────
 
   const stopCamera = useCallback(() => {
+    console.log('[Workout] stopping camera');
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
-    if (rafRef.current !== null) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
+    setStream(null);
+    frameLoopActiveRef.current = false;
+    if (frameTimerRef.current !== null) {
+      clearTimeout(frameTimerRef.current);
+      frameTimerRef.current = null;
     }
   }, []);
 
-  const startCamera = useCallback(async (): Promise<boolean> => {
+  /** Request camera. Does NOT attach stream to any element — LiveWorkoutView does that via useEffect. */
+  const acquireCamera = useCallback(async (): Promise<boolean> => {
+    console.log('[Workout] requesting camera');
+
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      const reason: CameraErrorReason = 'UnsupportedBrowser';
+      setCameraErrorReason(reason);
+      setStartError(cameraErrorMessage(reason));
+      console.error('[Workout] getUserMedia not available in this environment');
+      return false;
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play().catch(() => {});
-      }
+      const ms = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      streamRef.current = ms;
+      setStream(ms); // triggers LiveWorkoutView's useEffect to attach it
+
+      const tracks = ms.getVideoTracks();
+      console.log('[Workout] camera granted — tracks:', tracks.map((t) => `${t.label} (${t.readyState})`).join(', '));
+
       // Create off-screen capture canvas once
       if (!captureCanvasRef.current) {
         captureCanvasRef.current = document.createElement('canvas');
       }
       return true;
-    } catch {
+    } catch (err: unknown) {
+      const reason = classifyDOMException(err);
+      const msg    = cameraErrorMessage(reason);
+      setCameraErrorReason(reason);
+      setStartError(msg);
+      console.error('[Workout] camera error:', reason, err);
       return false;
     }
   }, []);
 
-  // ── Frame capture loop (ping-pong) ───────────────────────────────────────────
+  // ── Frame capture loop (rate-limited, NOT RAF) ────────────────────────────────
 
-  const captureAndSend = useCallback(() => {
-    const ws = wsRef.current;
-    const video = videoRef.current;
+  const scheduleNextFrame = useCallback(() => {
+    if (!frameLoopActiveRef.current) return;
+    frameTimerRef.current = setTimeout(() => {
+      sendFrame();
+    }, FRAME_INTERVAL_MS);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const sendFrame = useCallback(() => {
+    if (!frameLoopActiveRef.current) return;
+
+    const ws        = wsRef.current;
     const capCanvas = captureCanvasRef.current;
+
+    // Find the live <video> element through the exposed stream tracks
+    // We locate it by querying the document for a video with our stream's id
+    const videoEl = document.getElementById('workout-video') as HTMLVideoElement | null;
 
     if (
       !ws ||
       ws.readyState !== WebSocket.OPEN ||
-      !video ||
+      !videoEl ||
       !capCanvas ||
       pausedRef.current ||
       awaitingFrameRef.current
     ) {
-      rafRef.current = requestAnimationFrame(captureAndSend);
+      scheduleNextFrame();
       return;
     }
 
-    capCanvas.width = video.videoWidth || 640;
-    capCanvas.height = video.videoHeight || 480;
+    // Guard: video must have valid dimensions (stream is playing)
+    if (!videoEl.videoWidth || !videoEl.videoHeight) {
+      scheduleNextFrame();
+      return;
+    }
+
+    capCanvas.width  = videoEl.videoWidth;
+    capCanvas.height = videoEl.videoHeight;
     const ctx = capCanvas.getContext('2d');
-    if (!ctx) {
-      rafRef.current = requestAnimationFrame(captureAndSend);
-      return;
-    }
+    if (!ctx) { scheduleNextFrame(); return; }
 
-    ctx.drawImage(video, 0, 0, capCanvas.width, capCanvas.height);
+    ctx.drawImage(videoEl, 0, 0, capCanvas.width, capCanvas.height);
     capCanvas.toBlob(
       (blob) => {
-        if (!blob) return;
+        if (!blob) { scheduleNextFrame(); return; }
         awaitingFrameRef.current = true;
         blob.arrayBuffer().then((buf) => {
           if (wsRef.current?.readyState === WebSocket.OPEN) {
             wsRef.current.send(buf);
+          } else {
+            awaitingFrameRef.current = false;
+            scheduleNextFrame();
           }
         });
       },
       'image/jpeg',
       FRAME_JPEG_QUALITY,
     );
-
-    rafRef.current = requestAnimationFrame(captureAndSend);
-  }, []);
+    // Note: scheduleNextFrame() is called from onmessage (after ACK) to enforce ping-pong
+  }, [scheduleNextFrame]);
 
   // ── WebSocket ────────────────────────────────────────────────────────────────
 
   const closeWs = useCallback(() => {
     if (wsRef.current) {
-      wsRef.current.onclose = null;
-      wsRef.current.onerror = null;
+      wsRef.current.onclose   = null;
+      wsRef.current.onerror   = null;
       wsRef.current.onmessage = null;
       wsRef.current.close();
       wsRef.current = null;
+      console.log('[Workout] websocket closed');
     }
   }, []);
 
   const openWs = useCallback((sid: string) => {
     closeWs();
+    const url = `${WS_BASE}/ws/webcam?session_id=${sid}`;
+    console.log('[Workout] connecting websocket:', url);
     setConnectionState('CONNECTING');
-    const ws = new WebSocket(`${WS_BASE}/ws/webcam?session_id=${sid}`);
+
+    const ws = new WebSocket(url);
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
 
     ws.onopen = () => {
       reconnectAttemptsRef.current = 0;
+      awaitingFrameRef.current     = false;
+      frameLoopActiveRef.current   = true;
       setConnectionState('LIVE');
-      awaitingFrameRef.current = false;
-      rafRef.current = requestAnimationFrame(captureAndSend);
+      console.log('[Workout] websocket opened');
+      scheduleNextFrame();
     };
 
     ws.onmessage = (event: MessageEvent<ArrayBuffer>) => {
-      // Received annotated JPEG frame
+      // Received annotated JPEG — unblock next frame
       awaitingFrameRef.current = false;
+      console.log('[Workout] websocket message: annotated frame', event.data.byteLength, 'bytes');
+
       const blob = new Blob([event.data], { type: 'image/jpeg' });
-      const url = URL.createObjectURL(blob);
+      const url  = URL.createObjectURL(blob);
       const canvas = annotatedCanvasRef.current;
-      if (!canvas) { URL.revokeObjectURL(url); return; }
+      if (!canvas) { URL.revokeObjectURL(url); scheduleNextFrame(); return; }
+
       const img = new Image();
       img.onload = () => {
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          canvas.width = img.width;
+          canvas.width  = img.width;
           canvas.height = img.height;
           ctx.drawImage(img, 0, 0);
         }
         URL.revokeObjectURL(url);
+        scheduleNextFrame(); // only schedule next frame after receiving this one (ping-pong)
       };
+      img.onerror = () => { URL.revokeObjectURL(url); scheduleNextFrame(); };
       img.src = url;
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
+      console.log('[Workout] websocket closed (code=%d, reason=%s)', ev.code, ev.reason);
+      frameLoopActiveRef.current = false;
       if (stoppingRef.current) return;
       if (reconnectAttemptsRef.current < 3) {
         reconnectAttemptsRef.current += 1;
         setConnectionState('RECONNECTING');
+        console.log('[Workout] reconnect attempt', reconnectAttemptsRef.current);
         reconnectTimerRef.current = setTimeout(() => {
           if (sessionRef.current) openWs(sessionRef.current.sessionId);
         }, 2000);
@@ -233,15 +321,18 @@ export function useWorkoutSession(): UseWorkoutSessionReturn {
       }
     };
 
-    ws.onerror = () => { ws.close(); };
-  }, [captureAndSend, closeWs]);
+    ws.onerror = (ev) => {
+      console.error('[Workout] websocket error:', ev);
+      ws.close();
+    };
+  }, [closeWs, scheduleNextFrame]);
 
   // ── Stats polling ─────────────────────────────────────────────────────────────
 
   const startStatsPolling = useCallback((sid: string) => {
     if (statsIntervalRef.current) clearInterval(statsIntervalRef.current);
     statsIntervalRef.current = setInterval(async () => {
-      if (pausedRef.current) return;
+      if (pausedRef.current || stoppingRef.current) return;
       try {
         const s = await getWorkoutStats(sid);
         setStats(s);
@@ -261,7 +352,6 @@ export function useWorkoutSession(): UseWorkoutSessionReturn {
   // ── Elapsed timer ─────────────────────────────────────────────────────────────
 
   const startTimer = useCallback((startedAt: Date) => {
-    startedAtRef.current = startedAt;
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     timerIntervalRef.current = setInterval(() => {
       setElapsedSeconds(Math.floor((Date.now() - startedAt.getTime()) / 1000));
@@ -277,26 +367,36 @@ export function useWorkoutSession(): UseWorkoutSessionReturn {
 
   // ── Public actions ────────────────────────────────────────────────────────────
 
+  /**
+   * Lifecycle order:
+   * 1. Acquire camera (getUserMedia) → exposes stream via setStream()
+   * 2. Create backend session
+   * 3. setSession() → page re-renders LiveWorkoutView which attaches stream via useEffect
+   * 4. openWs() → WS opens → frame loop starts
+   */
   const startSession = useCallback(async (
     exercise: string,
     targetReps: number,
     targetSets: number,
   ) => {
     setStartError(null);
+    setCameraErrorReason(null);
     setConnectionState('CONNECTING');
+    console.log('[Workout] starting session — exercise:', exercise);
 
-    // 1. Request camera first — fail fast before hitting the API
-    const cameraOk = await startCamera();
+    // STEP 1: Request camera (before rendering live view so we fail fast)
+    const cameraOk = await acquireCamera();
     if (!cameraOk) {
       setConnectionState('ERROR');
-      setStartError('Camera access was denied. Please allow camera access and try again.');
       return;
     }
+    setConnectionState('READY');
 
-    // 2. Create authenticated backend session
+    // STEP 2: Create authenticated backend session
     let sessionData: StartSessionResponse;
     try {
       sessionData = await startWorkoutSession(exercise, targetReps, targetSets);
+      console.log('[Workout] session id:', sessionData.session_id);
     } catch (err: unknown) {
       stopCamera();
       setConnectionState('ERROR');
@@ -307,32 +407,41 @@ export function useWorkoutSession(): UseWorkoutSessionReturn {
 
     const ws: WorkoutSession = {
       sessionId: sessionData.session_id,
-      exercise: sessionData.exercise,
+      exercise:  sessionData.exercise,
       targetReps,
       targetSets,
       startedAt: sessionData.started_at,
     };
+
+    stoppingRef.current          = false;
+    reconnectAttemptsRef.current = 0;
+    pausedRef.current            = false;
+
+    // STEP 3: Commit session to state — this triggers re-render of LiveWorkoutView.
+    // LiveWorkoutView's useEffect will attach streamRef.current to its <video> element.
     setSession(ws);
     sessionRef.current = ws;
-    stoppingRef.current = false;
 
-    // 3. Open WebSocket and start stats/timer
-    openWs(sessionData.session_id);
-    startStatsPolling(sessionData.session_id);
-    startTimer(new Date(sessionData.started_at));
-    setConnectionState('LIVE');
-  }, [startCamera, stopCamera, openWs, startStatsPolling, startTimer]);
+    // STEP 4: Start background services (WS, stats, timer).
+    // Small timeout lets React flush the LiveWorkoutView render so its <video> ref exists.
+    setTimeout(() => {
+      openWs(sessionData.session_id);
+      startStatsPolling(sessionData.session_id);
+      startTimer(new Date(sessionData.started_at));
+    }, 150);
+  }, [acquireCamera, stopCamera, openWs, startStatsPolling, startTimer]);
 
   const endSession = useCallback(async () => {
     const sid = sessionRef.current?.sessionId;
     if (!sid || stoppingRef.current) return;
 
-    stoppingRef.current = true;
+    stoppingRef.current        = true;
+    frameLoopActiveRef.current = false;
     setConnectionState('STOPPING');
     setStopError(null);
+    console.log('[Workout] stopping session:', sid);
 
-    // Stop frame loop and stats before making the stop call
-    if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+    if (frameTimerRef.current) { clearTimeout(frameTimerRef.current); frameTimerRef.current = null; }
     stopStatsPolling();
     stopTimer();
     closeWs();
@@ -356,15 +465,18 @@ export function useWorkoutSession(): UseWorkoutSessionReturn {
 
   const clearErrors = useCallback(() => {
     setStartError(null);
+    setCameraErrorReason(null);
     setStopError(null);
+    setConnectionState('IDLE');
   }, []);
 
   // ── Cleanup on unmount ────────────────────────────────────────────────────────
 
   useEffect(() => {
     return () => {
-      stoppingRef.current = true;
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      stoppingRef.current        = true;
+      frameLoopActiveRef.current = false;
+      if (frameTimerRef.current) clearTimeout(frameTimerRef.current);
       stopStatsPolling();
       stopTimer();
       closeWs();
@@ -380,12 +492,13 @@ export function useWorkoutSession(): UseWorkoutSessionReturn {
     elapsedSeconds,
     completionData,
     startError,
+    cameraErrorReason,
     stopError,
+    stream,
     startSession,
     endSession,
     togglePause,
     clearErrors,
-    videoRef,
     annotatedCanvasRef,
   };
 }

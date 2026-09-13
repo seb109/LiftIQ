@@ -16,24 +16,22 @@ function WorkoutPageContent() {
     elapsedSeconds,
     completionData,
     startError,
+    cameraErrorReason,
     stopError,
+    stream,
     startSession,
     endSession,
     togglePause,
     clearErrors,
-    videoRef,
     annotatedCanvasRef,
   } = useWorkoutSession();
 
-  const isStarting = connectionState === 'CONNECTING' && !session;
+  const isStarting = (connectionState === 'CONNECTING' || connectionState === 'READY') && !session;
   const isLive     = session !== null && connectionState !== 'COMPLETED' && connectionState !== 'IDLE';
   const isDone     = connectionState === 'COMPLETED' && completionData !== null;
 
-  // Camera permission denied (ERROR before a session was established)
-  const isCameraError =
-    connectionState === 'ERROR' &&
-    !session &&
-    startError?.toLowerCase().includes('camera');
+  // Camera error: permission denied, not found, etc.
+  const isCameraError = connectionState === 'ERROR' && !session && cameraErrorReason !== null;
 
   const handleRetry = () => {
     clearErrors();
@@ -51,15 +49,15 @@ function WorkoutPageContent() {
         <span className="w-12 h-12 border-2 border-lime-400/30 border-t-lime-400 rounded-full animate-spin" />
         <div className="text-center space-y-1">
           <p className="text-lg font-semibold text-white">Finishing your workout…</p>
-          <p className="text-sm text-slate-400">Analyzing your session and generating your AI report.</p>
+          <p className="text-sm text-slate-400">Saving your session and generating your AI report.</p>
         </div>
       </div>
     );
   }
 
-  // ── Camera permission error ────────────────────────────────────────────────
+  // ── Camera permission / hardware error ─────────────────────────────────────
   if (isCameraError) {
-    return <CameraPermissionError onRetry={handleRetry} />;
+    return <CameraPermissionError onRetry={handleRetry} errorReason={cameraErrorReason} startError={startError} />;
   }
 
   // ── Live workout ───────────────────────────────────────────────────────────
@@ -76,7 +74,7 @@ function WorkoutPageContent() {
           stats={stats}
           elapsedSeconds={elapsedSeconds}
           connectionState={connectionState}
-          videoRef={videoRef}
+          stream={stream}
           annotatedCanvasRef={annotatedCanvasRef}
           onEnd={endSession}
           onTogglePause={togglePause}

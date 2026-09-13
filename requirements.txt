@@ -8,9 +8,15 @@ uvicorn[standard]==0.34.0
 python-multipart==0.0.20
 jinja2==3.1.5
 python-dotenv==1.0.1
+pydantic-settings
 
 # AI coaching
 groq==0.15.0
+
+# Database ORM & migrations
+sqlalchemy==2.0.36
+alembic==1.14.0
+psycopg2-binary
 
 # Authentication
 python-jose[cryptography]==3.5.0
@@ -21,4 +27,3 @@ bcrypt==3.2.2
 mediapipe==0.10.21
 opencv-contrib-python==4.10.0.84
 numpy==1.26.4
-

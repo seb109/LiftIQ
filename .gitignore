@@ -35,5 +35,15 @@ dist/
 
 # Build
 build/
+
 # Large test videos
 vids/
+
+# SQLite fallback databases (local dev without Docker)
+*.db
+*.sqlite
+*.sqlite3
+
+# Docker Compose local overrides (machine-specific)
+compose.override.yaml
+docker-compose.override.yml

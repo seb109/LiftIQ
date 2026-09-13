@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { WorkoutSession } from '@/lib/use-workout-session';
 import { WorkoutStats } from '@/lib/api';
 import { ConnectionState } from '@/lib/use-workout-session';
@@ -18,7 +18,8 @@ interface LiveWorkoutViewProps {
   stats: WorkoutStats | null;
   elapsedSeconds: number;
   connectionState: ConnectionState;
-  videoRef: React.RefObject<HTMLVideoElement | null>;
+  /** The live MediaStream from getUserMedia. LiveWorkoutView owns attachment to the <video>. */
+  stream: MediaStream | null;
   annotatedCanvasRef: React.RefObject<HTMLCanvasElement | null>;
   onEnd: () => Promise<void>;
   onTogglePause: () => void;
@@ -29,14 +30,52 @@ export function LiveWorkoutView({
   stats,
   elapsedSeconds,
   connectionState,
-  videoRef,
+  stream,
   annotatedCanvasRef,
   onEnd,
   onTogglePause,
 }: LiveWorkoutViewProps) {
   const [showEndDialog, setShowEndDialog] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const isStopping = connectionState === 'STOPPING';
   const isPaused   = connectionState === 'PAUSED';
+
+  /**
+   * Attach the MediaStream to the <video> element once both are available.
+   * This runs whenever `stream` changes (including initial mount when stream is set).
+   * Using autoPlay attribute + srcObject assignment is the correct cross-browser pattern.
+   */
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !stream) return;
+
+    console.log('[Workout] attaching stream to <video> element');
+    video.srcObject = stream;
+
+    // autoPlay may not trigger in all browsers without an explicit .play() call,
+    // but .play() returns a promise — we must handle the rejection gracefully.
+    video.play().then(() => {
+      console.log('[Workout] video.play() succeeded');
+    }).catch((err) => {
+      // AbortError is harmless (play() interrupted by a later call)
+      if (err?.name !== 'AbortError') {
+        console.warn('[Workout] video.play() rejected:', err?.name, err?.message);
+      }
+    });
+
+    return () => {
+      // Detach stream when component unmounts or stream changes
+      video.srcObject = null;
+    };
+  }, [stream]);
+
+  // Log when video metadata is loaded (dimensions available)
+  const handleLoadedMetadata = () => {
+    const video = videoRef.current;
+    if (video) {
+      console.log('[Workout] video metadata loaded — dimensions:', video.videoWidth, 'x', video.videoHeight);
+    }
+  };
 
   const handleEndConfirm = async () => {
     setShowEndDialog(false);
@@ -68,31 +107,41 @@ export function LiveWorkoutView({
         <div className="flex-1 flex flex-col lg:flex-row gap-0 overflow-hidden">
 
           {/* Camera area (hero) */}
-          <div className="relative flex-1 bg-zinc-950 flex items-center justify-center overflow-hidden">
-            {/* Hidden video element (MediaStream source) */}
+          <div className="relative flex-1 bg-zinc-950 flex items-center justify-center overflow-hidden min-h-[300px]">
+
+            {/*
+              Live camera preview — always visible so the user sees themselves.
+              The annotated canvas is drawn on top via absolute positioning once frames arrive.
+              video is NOT hidden: stream.videoWidth/Height must be > 0 for frame capture.
+            */}
             <video
               ref={videoRef}
               id="workout-video"
+              autoPlay
               muted
               playsInline
-              className="hidden"
-              aria-hidden="true"
+              onLoadedMetadata={handleLoadedMetadata}
+              className="w-full h-full object-cover max-h-[calc(100vh-120px)]"
+              aria-label="Live camera preview"
             />
 
-            {/* Annotated canvas — shows processed frames from backend */}
+            {/*
+              Annotated canvas — drawn on top of raw video feed once frames return from backend.
+              Starts transparent; fills in as annotated JPEG frames arrive.
+            */}
             <canvas
               ref={annotatedCanvasRef}
               id="annotated-canvas"
-              className="w-full h-full object-contain max-h-[calc(100vh-120px)]"
-              aria-label="Live pose detection view"
+              className="absolute inset-0 w-full h-full object-contain"
+              aria-label="Live pose detection overlay"
             />
 
-            {/* Connecting overlay */}
-            {(connectionState === 'CONNECTING' || connectionState === 'RECONNECTING') && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950/70 gap-4">
+            {/* Connecting overlay (before WS is open) */}
+            {(connectionState === 'CONNECTING' || connectionState === 'RECONNECTING' || connectionState === 'READY') && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950/60 gap-4">
                 <span className="w-10 h-10 border-2 border-lime-400/30 border-t-lime-400 rounded-full animate-spin" />
-                <p className="text-sm text-slate-400">
-                  {connectionState === 'RECONNECTING' ? 'Reconnecting…' : 'Connecting to camera…'}
+                <p className="text-sm text-slate-300 font-medium">
+                  {connectionState === 'RECONNECTING' ? 'Reconnecting…' : 'Starting camera…'}
                 </p>
               </div>
             )}
@@ -105,14 +154,14 @@ export function LiveWorkoutView({
               </div>
             )}
 
-            {/* Mobile quick-stats overlay (bottom-left of camera) */}
-            <div className="absolute bottom-3 left-3 lg:hidden flex items-center gap-2">
-              <div className="bg-zinc-950/80 border border-zinc-800/80 rounded-lg px-3 py-1.5 text-center">
+            {/* Mobile quick-stats overlay */}
+            <div className="absolute bottom-3 left-3 lg:hidden flex items-center gap-2 z-10">
+              <div className="bg-zinc-950/80 border border-zinc-800/80 rounded-lg px-3 py-1.5 text-center backdrop-blur-sm">
                 <span id="mobile-rep-count" className="text-xl font-extrabold text-white tabular-nums">{stats?.counter ?? 0}</span>
                 <span className="text-xs text-slate-400 ml-1">reps</span>
               </div>
               {stats?.form_score !== null && stats?.form_score !== undefined && (
-                <div className="bg-zinc-950/80 border border-zinc-800/80 rounded-lg px-3 py-1.5">
+                <div className="bg-zinc-950/80 border border-zinc-800/80 rounded-lg px-3 py-1.5 backdrop-blur-sm">
                   <span className="text-xl font-bold text-lime-400 tabular-nums">{Math.round(stats.form_score)}</span>
                   <span className="text-xs text-slate-400 ml-1">form</span>
                 </div>
@@ -133,12 +182,9 @@ export function LiveWorkoutView({
 
         {/* ── Bottom bar ───────────────────────────────────────────────────── */}
         <div className="border-t border-zinc-800/60 bg-zinc-950/80 backdrop-blur-md px-4 sm:px-6 py-3 space-y-3">
-          {/* Coaching message */}
           <CoachingBar stats={stats} />
 
-          {/* Controls */}
           <div className="flex items-center justify-between gap-3">
-            {/* Mobile stats pill */}
             <div className="flex lg:hidden items-center gap-2 text-xs text-slate-400">
               <span>Set {stats?.current_set ?? 1}/{session.targetSets}</span>
               <span className="text-zinc-700">•</span>

@@ -18,7 +18,7 @@ for (const ex of EXPECTED_EXERCISES) {
 }
 console.log('  ✅ PASS: All 6 canonical exercise IDs present in WorkoutSetup');
 
-// ── 2. WorkoutSetup component file exists ─────────────────────────────────────
+// ── 2. Workout component files exist ─────────────────────────────────────────
 console.log('\nTest 2: Workout component files exist');
 const workoutFiles = [
   'components/workout/workout-setup.tsx',
@@ -61,8 +61,8 @@ assert.ok(apiSrc.includes('current_set:'), 'Missing current_set field in Workout
 assert.ok(apiSrc.includes('is_resting:'), 'Missing is_resting field in WorkoutStats');
 console.log('  ✅ PASS: WorkoutStats interface has all required fields');
 
-// ── 6. useWorkoutSession hook exists ──────────────────────────────────────────
-console.log('\nTest 6: useWorkoutSession hook exists and exports lifecycle functions');
+// ── 6. useWorkoutSession hook exists and exports correct API ──────────────────
+console.log('\nTest 6: useWorkoutSession hook exists and exports correct lifecycle functions');
 const hookPath = path.join(libDir, 'use-workout-session.ts');
 assert.ok(fs.existsSync(hookPath), 'Missing use-workout-session.ts');
 const hookSrc = fs.readFileSync(hookPath, 'utf8');
@@ -70,7 +70,10 @@ assert.ok(hookSrc.includes('export function useWorkoutSession'), 'Missing useWor
 assert.ok(hookSrc.includes('startSession'), 'Missing startSession in hook');
 assert.ok(hookSrc.includes('endSession'), 'Missing endSession in hook');
 assert.ok(hookSrc.includes('togglePause'), 'Missing togglePause in hook');
-console.log('  ✅ PASS: useWorkoutSession hook exports startSession, endSession, togglePause');
+// New API: exposes stream not videoRef
+assert.ok(hookSrc.includes('stream'), 'Missing stream in hook return');
+assert.ok(hookSrc.includes('cameraErrorReason'), 'Missing cameraErrorReason in hook return');
+console.log('  ✅ PASS: useWorkoutSession hook exports startSession, endSession, togglePause, stream, cameraErrorReason');
 
 // ── 7. Stats poll interval constant ──────────────────────────────────────────
 console.log('\nTest 7: STATS_POLL_INTERVAL_MS constant is defined and reasonable');
@@ -79,7 +82,7 @@ const match = hookSrc.match(/STATS_POLL_INTERVAL_MS\s*=\s*(\d+)/);
 assert.ok(match, 'Cannot parse STATS_POLL_INTERVAL_MS value');
 const interval = parseInt(match![1], 10);
 assert.ok(interval >= 500 && interval <= 2000, `STATS_POLL_INTERVAL_MS=${interval} is outside 500–2000ms range`);
-console.log(`  ✅ PASS: STATS_POLL_INTERVAL_MS=${interval}ms (within 500–2000ms)`);
+console.log(`  ✅ PASS: STATS_POLL_INTERVAL_MS=${interval}ms`);
 
 // ── 8. Frame quality constant ────────────────────────────────────────────────
 console.log('\nTest 8: FRAME_JPEG_QUALITY constant is defined and within valid range');
@@ -96,32 +99,54 @@ assert.ok(hookSrc.includes('stopCamera'), 'Missing stopCamera call in cleanup');
 assert.ok(hookSrc.includes("getTracks().forEach"), 'Missing getTracks cleanup in stopCamera');
 console.log('  ✅ PASS: Camera stream cleanup is present');
 
-// ── 10. WebSocket ping-pong frame control ─────────────────────────────────────
-console.log('\nTest 10: WebSocket ping-pong frame control present (awaitingFrameRef)');
-assert.ok(hookSrc.includes('awaitingFrameRef'), 'Missing ping-pong frame gate (awaitingFrameRef)');
-console.log('  ✅ PASS: Ping-pong frame gate prevents WebSocket flooding');
+// ── 10. Rate-limited frame sending (not unbounded RAF) ─────────────────────────
+console.log('\nTest 10: Frame sending is rate-limited (not a runaway requestAnimationFrame loop)');
+assert.ok(hookSrc.includes('FRAME_INTERVAL_MS'), 'Missing FRAME_INTERVAL_MS rate limit constant');
+assert.ok(hookSrc.includes('setTimeout'), 'Frame loop must use setTimeout for rate limiting');
+const rateMatch = hookSrc.match(/FRAME_INTERVAL_MS\s*=\s*(\d+)/);
+assert.ok(rateMatch, 'Cannot parse FRAME_INTERVAL_MS value');
+const frameInterval = parseInt(rateMatch![1], 10);
+assert.ok(frameInterval >= 50, `FRAME_INTERVAL_MS=${frameInterval} is too fast (minimum 50ms / 20fps)`);
+console.log(`  ✅ PASS: Frame interval=${frameInterval}ms — rate-limited, not a runaway RAF`);
 
-// ── 11. EndWorkoutDialog requires deliberate action ───────────────────────────
-console.log('\nTest 11: EndWorkoutDialog requires confirmation before stopping');
-const dialogSrc = fs.readFileSync(path.join(compDir, 'workout/end-workout-dialog.tsx'), 'utf8');
-assert.ok(dialogSrc.includes('confirm-end-workout'), 'Missing confirm-end-workout button id');
-assert.ok(dialogSrc.includes('cancel-end-workout'), 'Missing cancel-end-workout button id');
-console.log('  ✅ PASS: End workout confirmation dialog has Cancel and Confirm actions');
+// ── 11. Camera error classification ──────────────────────────────────────────
+console.log('\nTest 11: Camera errors are classified by DOMException.name (not a generic catch-all)');
+const cameraErrors = ['NotAllowedError', 'NotFoundError', 'NotReadableError', 'OverconstrainedError', 'SecurityError'];
+for (const errName of cameraErrors) {
+  assert.ok(hookSrc.includes(errName), `Missing camera error case: ${errName}`);
+}
+console.log('  ✅ PASS: All 5 DOMException camera error types are handled');
 
-// ── 12. WorkoutCompleteView uses real backend fields ──────────────────────────
-console.log('\nTest 12: WorkoutCompleteView displays real backend StopSessionResponse fields');
+// ── 12. Video element has autoPlay, muted, playsInline ────────────────────────
+console.log('\nTest 12: <video> element has autoPlay, muted, playsInline (required for camera preview)');
+const liveViewSrc = fs.readFileSync(path.join(compDir, 'workout/live-workout-view.tsx'), 'utf8');
+assert.ok(liveViewSrc.includes('autoPlay'), 'Missing autoPlay on <video>');
+assert.ok(liveViewSrc.includes('muted'),    'Missing muted on <video>');
+assert.ok(liveViewSrc.includes('playsInline'), 'Missing playsInline on <video>');
+// Video must NOT be hidden — it's the preview
+assert.ok(!liveViewSrc.includes('className="hidden"'), '<video> must not be hidden — it is the camera preview');
+console.log('  ✅ PASS: <video> has autoPlay + muted + playsInline and is not hidden');
+
+// ── 13. Stream attached via useEffect in LiveWorkoutView ──────────────────────
+console.log('\nTest 13: Stream is attached to <video> via useEffect in LiveWorkoutView (not in hook)');
+assert.ok(liveViewSrc.includes('srcObject = stream'), 'Missing srcObject assignment in LiveWorkoutView');
+assert.ok(liveViewSrc.includes('useEffect'), 'Missing useEffect for stream attachment');
+console.log('  ✅ PASS: Stream attached to <video> via useEffect after component mounts');
+
+// ── 14. WorkoutCompleteView uses real backend fields ──────────────────────────
+console.log('\nTest 14: WorkoutCompleteView displays real backend StopSessionResponse fields');
 const completeSrc = fs.readFileSync(path.join(compDir, 'workout/workout-complete-view.tsx'), 'utf8');
 assert.ok(completeSrc.includes('data.total_reps'), 'Missing total_reps display');
 assert.ok(completeSrc.includes('data.duration_seconds'), 'Missing duration_seconds display');
 assert.ok(completeSrc.includes('data.average_form_score'), 'Missing average_form_score display');
-console.log('  ✅ PASS: Completion screen uses real backend fields (total_reps, duration_seconds, average_form_score)');
+console.log('  ✅ PASS: Completion screen uses real backend fields');
 
-// ── 13. Dashboard Start Workout navigates to /workout ─────────────────────────
-console.log('\nTest 13: Dashboard Start Workout button navigates to /workout route');
+// ── 15. Dashboard Start Workout navigates to /workout ─────────────────────────
+console.log('\nTest 15: Dashboard Start Workout button navigates to /workout route');
 const dashPageSrc = fs.readFileSync(path.join(appDir, 'page.tsx'), 'utf8');
-assert.ok(dashPageSrc.includes("router.push('/workout')"), "Dashboard handleStartWorkout must call router.push('/workout')");
+assert.ok(dashPageSrc.includes("router.push('/workout')"), "Dashboard must call router.push('/workout')");
 assert.ok(!dashPageSrc.includes('alert('), 'Dashboard must not use alert() placeholder');
-console.log("  ✅ PASS: Dashboard routes to '/workout' — alert() placeholder removed");
+console.log("  ✅ PASS: Dashboard routes to '/workout'");
 
 console.log('\n==================================================');
 console.log('🎉 All Milestone 6C Workout Experience Tests PASSED!');

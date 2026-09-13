@@ -1,0 +1,88 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# LiftIQ — Docker Compose
+# Local development stack: postgres + backend + frontend
+#
+# Quick start:
+#   1. cp .env.example .env          (fill in real values)
+#   2. docker compose up --build -d
+#   3. docker compose run --rm backend alembic upgrade head
+#   4. Open http://localhost:3001
+#
+# Stop (data preserved):   docker compose down
+# Destroy data (WARNING):  docker compose down -v
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── PostgreSQL 16 ────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-liftiq_db}
+      POSTGRES_USER: ${POSTGRES_USER:-liftiq_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-liftiq_dev_password}
+    volumes:
+      - liftiq_pgdata:/var/lib/postgresql/data
+    ports:
+      # Host port 5433 avoids collision with any local PostgreSQL installation
+      # that may already be running on the default 5432.
+      # Inside Docker, services connect to postgres:5432 (internal port unchanged).
+      - "5433:5432"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${POSTGRES_USER:-liftiq_user} -d ${POSTGRES_DB:-liftiq_db}
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ── FastAPI Backend ───────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    # env_file loads GROQ_API_KEY and any other variables from .env
+    env_file:
+      - .env
+    environment:
+      # DATABASE_URL uses the Docker-internal service hostname 'postgres', NOT localhost.
+      # The browser never uses this URL — only the backend server-side code does.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-liftiq_user}:${POSTGRES_PASSWORD:-liftiq_dev_password}@postgres:5432/${POSTGRES_DB:-liftiq_db}
+      # APP_ENV=docker disables the SQLite fallback in app/db/session.py.
+      # A PostgreSQL connection failure in Docker is always a hard error.
+      APP_ENV: docker
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3001}
+      SECRET_KEY: ${SECRET_KEY:-09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7}
+      ENVIRONMENT: docker
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── Next.js Frontend ──────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_API_URL must be the host-accessible backend URL.
+        # The browser (running on the user's machine) calls this address —
+        # it CANNOT use 'backend:8000' (Docker-internal hostname).
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    depends_on:
+      - backend
+
+# ── Named volumes ─────────────────────────────────────────────────────────────
+volumes:
+  liftiq_pgdata:
+    name: liftiq_pgdata

@@ -1,5 +1,65 @@
 # Project Progress & Task Checklist
 
+### Infrastructure Hardening: Local Docker + PostgreSQL Setup
+- **Status:** 🔄 In Progress (pauses Milestone 6D)
+- **Description:** Dockerized the full LiftIQ local development stack with a real PostgreSQL 16 database. Frontend locked to port 3001. Backend on 8000. PostgreSQL mapped to host port 5433 (5432 occupied by a separate local install). CORS updated to remove localhost:3000 references. WebSocket URL remains browser-resolvable via NEXT_PUBLIC_API_URL. Alembic migration workflow documented. Milestone 6C live workout must remain functional after Dockerization.
+- **Changes:**
+  - `requirements.txt`: Added `psycopg2-binary` (PostgreSQL driver) and `pydantic-settings`
+  - `app/core/config.py`: Added `FRONTEND_URL`, `ENVIRONMENT`, `LOG_LEVEL` settings
+  - `app/db/session.py`: SQLite fallback disabled when `APP_ENV=docker`
+  - `main.py`: CORS now environment-driven via `settings.FRONTEND_URL`; removed `localhost:3000`
+  - `frontend/package.json`: `dev` and `start` scripts locked to `-p 3001`
+  - `frontend/next.config.ts`: Added `output: 'standalone'` for Docker builds
+  - `frontend/src/components/workout/camera-permission-error.tsx`: Fixed `localhost:3000` → `localhost:3001`
+  - `frontend/README.md`: Fixed `localhost:3000` → `localhost:3001`
+  - `Dockerfile`: Backend image (Python 3.12-slim + system libs for MediaPipe/OpenCV)
+  - `frontend/Dockerfile`: Multi-stage frontend image (deps → build → runner) on port 3001
+  - `compose.yaml`: Three-service stack (postgres 5433:5432, backend 8000:8000, frontend 3001:3001)
+  - `.dockerignore` / `frontend/.dockerignore`: Exclude secrets and build artifacts
+  - `.env.example`: Full expansion with all required variables
+  - `frontend/.env.example`: Added with NEXT_PUBLIC_API_URL
+  - `.gitignore`: Added `*.db`, `compose.override.yaml`
+  - `README.md`: Rewrote with Local Development with Docker section
+
+- **Port Map:**
+  | Service | Host Port | Docker Port |
+  |---------|-----------|-------------|
+  | Frontend | 3001 | 3001 |
+  | Backend | 8000 | 8000 |
+  | PostgreSQL | **5433** | 5432 |
+
+- **Checklist:**
+  ✅ Docker Compose (`compose.yaml`)
+  ✅ PostgreSQL 16 container with named volume (`liftiq_pgdata`)
+  ✅ Frontend permanently locked to port 3001
+  ✅ Backend on port 8000
+  ✅ Host port 5433 for PostgreSQL (avoids collision with host PG on 5432)
+  ✅ PostgreSQL healthcheck (pg_isready, 10 retries)
+  ✅ Backend depends_on postgres (condition: service_healthy)
+  ✅ `NEXT_PUBLIC_API_URL=http://localhost:8000` (browser-accessible — not Docker hostname)
+  ✅ WebSocket URL derived from NEXT_PUBLIC_API_URL (ws:// protocol replacement)
+  ✅ CORS: localhost:3001 always allowed; FRONTEND_URL configures production origin
+  ✅ Backend Dockerfile (Python 3.12-slim + MediaPipe/OpenCV system libs)
+  ✅ Frontend Dockerfile (multi-stage, standalone output, PORT=3001)
+  ✅ `.dockerignore` files prevent secrets and venvs from leaking into images
+  ✅ `.env.example` expanded with all variables
+  ✅ Alembic migration strategy: `docker compose run --rm backend alembic upgrade head`
+  ✅ `APP_ENV=docker` disables SQLite fallback — PG failure is a hard error in Docker
+  ✅ `docker compose down` preserves data volume
+  ✅ `docker compose down -v` documented for intentional reset
+  ✅ README.md updated with Docker quick-start
+  ✅ Tests verified — npm test 22/22 PASS, pytest 37/37 PASS
+  ✅ `npm run build` clean — TypeScript OK, standalone output generated
+  ✅ Regression baseline verified — "Regression baselines match."
+  ✅ Docker images built — liftiq-backend and liftiq-frontend
+  ✅ Alembic upgrade head — 001_initial_schema applied to Docker PostgreSQL
+  ✅ Schema verified — all 5 tables + alembic_version created in liftiq_db
+  ✅ Backend PostgreSQL connection verified inside Docker network
+  ✅ Port conflict documented — compose.override.yaml.example for remapping
+  ✅ Git commit: `chore: dockerize liftiq with postgresql`
+
+---
+
 ### Milestone 6C: Live Workout Experience
 - **Status:** ✅ Complete
 - **Description:** Implemented the full browser-based live workout experience connecting the existing MediaPipe/OpenCV CV engine to a polished frontend. Backend `/stats` endpoint extended with `form_violations` and `form_score` (additive). New frontend pages and hooks manage camera access (`getUserMedia`), WebSocket ping-pong frame streaming to `/ws/webcam`, stats polling at 800ms intervals, elapsed timer, exercise setup, live view with annotated camera canvas, form coaching bar, and post-session completion screen with real backend data.

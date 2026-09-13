@@ -1,0 +1,23 @@
+# ── LiftIQ Frontend .dockerignore ─────────────────────────────────────────────
+
+# Node dependencies (installed fresh during build)
+node_modules/
+
+# Next.js build output (built during Docker build stage)
+.next/
+
+# Environment files (secrets)
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Version control
+.git/
+
+# TypeScript build info (rebuilt in container)
+*.tsbuildinfo

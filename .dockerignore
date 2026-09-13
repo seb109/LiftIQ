@@ -1,0 +1,54 @@
+# ── LiftIQ Backend .dockerignore ──────────────────────────────────────────────
+# Keeps the Docker build context lean and prevents secrets from leaking.
+
+# Python artifacts
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+
+# Local database (never bake into image)
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+uvicorn_*.log
+
+# Environment files (secrets — never bake into image)
+.env
+.env.*
+!.env.example
+
+# Version control
+.git/
+.gitignore
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Frontend (separate build context via frontend/)
+frontend/
+
+# Large test videos
+vids/
+
+# Docker files themselves (not needed in image)
+compose.yaml
+docker-compose.yml
+*.dockerignore
+
+# Development scratch
+scratch/

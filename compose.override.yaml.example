@@ -1,0 +1,25 @@
+# compose.override.yaml — LOCAL MACHINE OVERRIDES
+# ─────────────────────────────────────────────────────────────────────────────
+# This file is gitignored. Use it to remap host ports when another project
+# is already occupying the default ports (8000, 3001, etc.).
+#
+# Example: another project is using host port 8000.
+# Remap LiftIQ backend to 8001 on the host.
+# The frontend still calls http://localhost:8001, so set NEXT_PUBLIC_API_URL
+# and rebuild the frontend image after changing this.
+#
+# Usage: docker compose up -d  (compose.override.yaml is merged automatically)
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  backend:
+    ports:
+      - "8001:8000"      # Host 8001 → container 8000
+
+  # If you also need to remap the frontend or postgres:
+  # frontend:
+  #   ports:
+  #     - "3002:3001"
+  # postgres:
+  #   ports:
+  #     - "5434:5432"
