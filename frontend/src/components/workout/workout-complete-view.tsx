@@ -74,6 +74,26 @@ export function WorkoutCompleteView({ data }: WorkoutCompleteViewProps) {
         <p className="text-xs text-slate-600">AI report generation is in progress</p>
       )}
 
+      {/* View links */}
+      <div className="flex flex-col sm:flex-row gap-3 w-full max-w-sm">
+        <button
+          id="view-in-history-btn"
+          onClick={() => router.push(`/history/${data.session_id}`)}
+          className="flex-1 py-2.5 rounded-xl border border-zinc-700 text-slate-300 hover:bg-zinc-800 font-semibold text-xs transition-colors"
+        >
+          View in History
+        </button>
+        {data.report_id && (
+          <button
+            id="view-ai-report-btn"
+            onClick={() => router.push(`/reports/${data.report_id}`)}
+            className="flex-1 py-2.5 rounded-xl border border-lime-800/60 text-lime-400 hover:bg-lime-950/40 font-semibold text-xs transition-colors"
+          >
+            View AI Report
+          </button>
+        )}
+      </div>
+
       {/* CTAs */}
       <div className="flex flex-col sm:flex-row gap-3 w-full max-w-sm">
         <button

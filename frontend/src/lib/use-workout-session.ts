@@ -5,6 +5,7 @@ import {
   StartSessionResponse,
   StopSessionResponse,
   WorkoutStats,
+  getStoredAccessToken,
   getWorkoutStats,
   startWorkoutSession,
   stopWorkoutSession,
@@ -263,7 +264,8 @@ export function useWorkoutSession(): UseWorkoutSessionReturn {
 
   const openWs = useCallback((sid: string) => {
     closeWs();
-    const url = `${WS_BASE}/ws/webcam?session_id=${sid}`;
+    const accessToken = getStoredAccessToken();
+    const url = `${WS_BASE}/ws/webcam?session_id=${sid}&token=${encodeURIComponent(accessToken || '')}`;
     console.log('[Workout] connecting websocket:', url);
     setConnectionState('CONNECTING');
 

@@ -219,6 +219,19 @@ export interface AIReportItem {
   created_at: string | null;
 }
 
+export interface ExerciseMetricItem {
+  id: string;
+  rep_number: number | null;
+  stage: string | null;
+  form_score: number | null;
+  correction_message: string | null;
+  timestamp: string | null;
+}
+
+export interface WorkoutSessionDetail extends WorkoutSessionItem {
+  metrics: ExerciseMetricItem[];
+}
+
 export const sessionsApi = {
   getSessions: async (limit = 50): Promise<WorkoutSessionItem[]> => {
     const res = await apiClient.get<APIResponse<{ items: WorkoutSessionItem[]; count: number }>>(`/api/v1/sessions?limit=${limit}`);
@@ -226,6 +239,15 @@ export const sessionsApi = {
       throw new Error(res.data.message || 'Failed to fetch workout sessions');
     }
     return res.data.data.items || [];
+  },
+
+  /** Fetch a single workout session's detail (real metrics) by session ID. Ownership is enforced server-side (404 if not owned). */
+  getSessionDetail: async (sessionId: string): Promise<WorkoutSessionDetail> => {
+    const res = await apiClient.get<APIResponse<WorkoutSessionDetail>>(`/api/v1/sessions/${sessionId}`);
+    if (!res.data.success || !res.data.data) {
+      throw new Error(res.data.message || 'Failed to fetch workout session');
+    }
+    return res.data.data;
   },
 };
 
@@ -236,6 +258,15 @@ export const reportsApi = {
       throw new Error(res.data.message || 'Failed to fetch AI reports');
     }
     return res.data.data.items || [];
+  },
+
+  /** Fetch a single AI report by report ID OR session ID (backend resolves both). Ownership enforced server-side. */
+  getReportById: async (id: string): Promise<AIReportItem> => {
+    const res = await apiClient.get<APIResponse<AIReportItem>>(`/api/v1/reports/${id}`);
+    if (!res.data.success || !res.data.data) {
+      throw new Error(res.data.message || 'Failed to fetch AI report');
+    }
+    return res.data.data;
   },
 };
 
@@ -305,10 +336,8 @@ export const stopWorkoutSession = async (sessionId: string): Promise<StopSession
   return res.data.data;
 };
 
-/** Poll live CV stats from the legacy /stats endpoint (no auth required). */
+/** Poll live CV stats from the legacy /stats endpoint. Requires auth + session ownership. */
 export const getWorkoutStats = async (sessionId: string): Promise<WorkoutStats> => {
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-  const res = await fetch(`${baseUrl}/stats?session_id=${sessionId}`);
-  if (!res.ok) throw new Error('Failed to fetch workout stats');
-  return res.json() as Promise<WorkoutStats>;
+  const res = await apiClient.get<WorkoutStats>(`/stats?session_id=${sessionId}`);
+  return res.data;
 };

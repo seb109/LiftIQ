@@ -2,10 +2,12 @@ import logging
 import cv2
 import numpy as np
 import uuid
-from fastapi import FastAPI, UploadFile, File, BackgroundTasks, WebSocket, WebSocketDisconnect
+from typing import Optional
+from fastapi import Depends, FastAPI, HTTPException, UploadFile, File, BackgroundTasks, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
+from sqlalchemy.orm import Session
 import gym_trainer as gt
 import ai_trainer as ai
 import tempfile
@@ -13,7 +15,12 @@ import os
 
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.router import api_v1_router
+from app.api.deps import get_current_user
 from app.core.config import settings
+from app.core.security import decode_access_token
+from app.db.session import get_db
+from app.models.user import User
+from app.models.workout_session import WorkoutSession
 
 logging.basicConfig(
     level=logging.INFO,
@@ -110,8 +117,30 @@ async def end_session(data: dict):
     return JSONResponse({"status": "ok"})
 
 
+def _require_owned_session(session_id: Optional[str], current_user: User, db: Session) -> None:
+    """Raises 404 unless session_id names a WorkoutSession row owned by current_user.
+
+    Mirrors the "not found" response used by app/api/v1/endpoints/sessions.py for
+    unowned sessions, so this never distinguishes "doesn't exist" from "not yours".
+    """
+    if not session_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout session not found.")
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout session not found.")
+    session_entity = db.query(WorkoutSession).filter(WorkoutSession.id == session_uuid).first()
+    if not session_entity or session_entity.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout session not found.")
+
+
 @app.get("/stats")
-async def get_stats(session_id: str = None):
+async def get_stats(
+    session_id: str = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_owned_session(session_id, current_user, db)
     sess = gt.get_session_state(session_id)
     st = sess.state
     s = sess.session
@@ -155,8 +184,13 @@ async def get_stats(session_id: str = None):
 
 
 @app.get("/get_set_feedback")
-async def trigger_set_feedback(session_id: str = None):
+async def trigger_set_feedback(
+    session_id: str = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """Called after a set completes to get Groq feedback"""
+    _require_owned_session(session_id, current_user, db)
     sess = gt.get_session_state(session_id)
     s = sess.session
     if s["completed_sets"]:
@@ -225,11 +259,40 @@ async def webcam_feed(session_id: str = None):
     )
 
 
+def _ws_authorize_session(session_id: Optional[str], token: Optional[str], db: Session) -> bool:
+    """Validates the access token and confirms it owns session_id's WorkoutSession row.
+
+    Browsers cannot set Authorization headers on a WebSocket handshake, so the access
+    token travels as a query param instead (same token already held client-side for
+    Bearer auth on every other request) — no new auth mechanism, no frontend rewrite.
+    """
+    if not token or not session_id:
+        return False
+    try:
+        payload = decode_access_token(token)
+        user_id = uuid.UUID(payload.get("sub"))
+        session_uuid = uuid.UUID(session_id)
+    except Exception:
+        return False
+
+    session_entity = db.query(WorkoutSession).filter(WorkoutSession.id == session_uuid).first()
+    return bool(session_entity and session_entity.user_id == user_id)
+
+
 @app.websocket("/ws/webcam")
-async def ws_webcam(websocket: WebSocket, session_id: str = None):
+async def ws_webcam(
+    websocket: WebSocket,
+    session_id: str = None,
+    token: str = None,
+    db: Session = Depends(get_db),
+):
     """Receives JPEG frames captured client-side from the browser's own
     camera, runs them through the gym_trainer engine for session_id, and
     streams the processed JPEG frames back."""
+    if not _ws_authorize_session(session_id, token, db):
+        logger.warning("ws_webcam: rejected unauthorized connection (session_id=%s)", session_id)
+        await websocket.close(code=4401)
+        return
     await websocket.accept()
     try:
         while True:

@@ -1,6 +1,8 @@
 'use client';
 
 import React from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { WorkoutSessionItem } from '@/lib/api';
 import { formatExerciseName, formatDate, formatDuration } from '@/lib/use-dashboard-data';
 
@@ -9,6 +11,8 @@ interface RecentActivityProps {
 }
 
 export function RecentActivity({ sessions }: RecentActivityProps) {
+  const router = useRouter();
+
   if (!sessions || sessions.length === 0) {
     return (
       <div className="p-6 bg-zinc-900 border border-zinc-800 rounded-xl space-y-3">
@@ -28,9 +32,9 @@ export function RecentActivity({ sessions }: RecentActivityProps) {
         <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
           Recent Activity
         </h3>
-        <span className="text-xs text-zinc-500 font-mono">
-          Showing last {sessions.length} sessions
-        </span>
+        <Link href="/history" className="text-xs text-lime-400 hover:text-lime-300 font-semibold transition-colors">
+          View All →
+        </Link>
       </div>
 
       <div className="overflow-x-auto">
@@ -58,7 +62,11 @@ export function RecentActivity({ sessions }: RecentActivityProps) {
               }
 
               return (
-                <tr key={s.id} className="hover:bg-zinc-800/40 transition-colors">
+                <tr
+                  key={s.id}
+                  onClick={() => router.push(`/history/${s.id}`)}
+                  className="hover:bg-zinc-800/40 transition-colors cursor-pointer"
+                >
                   <td className="py-3 pr-4 font-semibold text-zinc-100">{exName}</td>
                   <td className="py-3 px-4 text-zinc-400 whitespace-nowrap">{dateStr}</td>
                   <td className="py-3 px-4 text-right font-mono text-zinc-200">{s.total_reps}</td>

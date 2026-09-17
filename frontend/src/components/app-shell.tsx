@@ -1,14 +1,18 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { Logo } from '@/components/ui/logo';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { LogOut, User, Activity } from 'lucide-react';
+import { LogOut, User, Activity, History } from 'lucide-react';
 
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, logout } = useAuth();
+  const pathname = usePathname();
+  const isHistoryActive = pathname?.startsWith('/history');
 
   return (
     <div className="min-h-screen bg-[#09090B] text-slate-100 flex flex-col font-sans">
@@ -17,6 +21,19 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-6">
             <Logo size="md" />
+            <nav className="hidden md:flex items-center gap-1">
+              <Link
+                href="/history"
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                  isHistoryActive
+                    ? 'bg-zinc-800 text-lime-400'
+                    : 'text-slate-400 hover:text-slate-100 hover:bg-zinc-800/50'
+                }`}
+              >
+                <History className="w-3.5 h-3.5" />
+                History
+              </Link>
+            </nav>
             <div className="hidden md:flex items-center gap-2">
               <Badge variant="lime" size="sm">
                 <span className="w-1.5 h-1.5 rounded-full bg-lime-400 animate-pulse mr-1.5 inline-block"></span>
