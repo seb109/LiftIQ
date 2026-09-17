@@ -411,9 +411,17 @@ def _create_default_rep_state(exercise="squat"):
         "ai_feedback": "",
         "last_rep_time": 0,
         "last_stage_change_time": time.time(),
-        "cooldown": 0.8,
+        # Residual wall-clock sanity floor against pathological sensor glitches —
+        # NOT the primary anti-double-count guard (see CONFIRM_FRAMES). A real
+        # rep can't physically complete in under 0.3s, so this only ever rejects
+        # noise, never a genuine fast rep.
+        "cooldown": 0.3,
         "min_angle_this_rep": 180,
         "angle_history": [],
+        # Consecutive smoothed-angle frames past the threshold currently being
+        # sought — must reach CONFIRM_FRAMES before a stage transition commits.
+        "consec_down": 0,
+        "consec_up": 0,
         "rep_start_time": time.time(),
         "form_metrics": {},        # {check_name: float} — current frame values
         "form_violations": [],     # [{check, value, message}] — current frame
@@ -565,6 +573,12 @@ def __getattr__(name: str):
 
 SMOOTHING_WINDOW = 5
 
+# Consecutive smoothed-angle frames required past a threshold before a stage
+# transition (up->down or down->up) commits. Filters single-frame smoothing
+# noise right at a boundary without adding perceptible latency (~2 frames,
+# well under 100ms at typical webcam frame rates).
+CONFIRM_FRAMES = 2
+
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
@@ -587,22 +601,16 @@ def vec_angle_deg(v1: np.ndarray, v2: np.ndarray) -> float:
     return float(np.degrees(np.arccos(cos_a)))
 
 
-def get_landmark(landmarks, name):
-    """
-    Return ([x, y], visibility) for a named landmark,
-    choosing whichever side (left/right) has higher visibility.
-    This single function is used for BOTH primary angle calculation
-    and form metric computation — consistent side selection throughout.
-    """
-    mapping_left = {
+_SIDE_LANDMARK_MAP = {
+    "left": {
         "hip":      mp_pose.PoseLandmark.LEFT_HIP,
         "knee":     mp_pose.PoseLandmark.LEFT_KNEE,
         "ankle":    mp_pose.PoseLandmark.LEFT_ANKLE,
         "shoulder": mp_pose.PoseLandmark.LEFT_SHOULDER,
         "elbow":    mp_pose.PoseLandmark.LEFT_ELBOW,
         "wrist":    mp_pose.PoseLandmark.LEFT_WRIST
-    }
-    mapping_right = {
+    },
+    "right": {
         "hip":      mp_pose.PoseLandmark.RIGHT_HIP,
         "knee":     mp_pose.PoseLandmark.RIGHT_KNEE,
         "ankle":    mp_pose.PoseLandmark.RIGHT_ANKLE,
@@ -610,10 +618,14 @@ def get_landmark(landmarks, name):
         "elbow":    mp_pose.PoseLandmark.RIGHT_ELBOW,
         "wrist":    mp_pose.PoseLandmark.RIGHT_WRIST
     }
-    lp = landmarks[mapping_left[name].value]
-    rp = landmarks[mapping_right[name].value]
-    pt = lp if lp.visibility > rp.visibility else rp
-    return [pt.x, pt.y], pt.visibility
+}
+
+
+def _dominant_side(landmarks) -> str:
+    """Which body side (left/right) is more visible this frame, by shoulder visibility."""
+    lsh = landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value]
+    rsh = landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value]
+    return "left" if lsh.visibility > rsh.visibility else "right"
 
 
 def _get_side_landmarks(landmarks, *names):
@@ -624,37 +636,40 @@ def _get_side_landmarks(landmarks, *names):
 
     This is critical: mixing left-shoulder with right-elbow gives
     nonsense angles. Every form metric function must use this helper
-    instead of calling get_landmark independently per point.
+    instead of picking each point's side independently.
 
     Returns: list of np.array([x, y]) in the same order as `names`
     """
-    mapping = {
-        "left": {
-            "hip":      mp_pose.PoseLandmark.LEFT_HIP,
-            "knee":     mp_pose.PoseLandmark.LEFT_KNEE,
-            "ankle":    mp_pose.PoseLandmark.LEFT_ANKLE,
-            "shoulder": mp_pose.PoseLandmark.LEFT_SHOULDER,
-            "elbow":    mp_pose.PoseLandmark.LEFT_ELBOW,
-            "wrist":    mp_pose.PoseLandmark.LEFT_WRIST
-        },
-        "right": {
-            "hip":      mp_pose.PoseLandmark.RIGHT_HIP,
-            "knee":     mp_pose.PoseLandmark.RIGHT_KNEE,
-            "ankle":    mp_pose.PoseLandmark.RIGHT_ANKLE,
-            "shoulder": mp_pose.PoseLandmark.RIGHT_SHOULDER,
-            "elbow":    mp_pose.PoseLandmark.RIGHT_ELBOW,
-            "wrist":    mp_pose.PoseLandmark.RIGHT_WRIST
-        }
-    }
-    lsh = landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value]
-    rsh = landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value]
-    side = "left" if lsh.visibility > rsh.visibility else "right"
+    side = _dominant_side(landmarks)
+    return [
+        np.array([landmarks[_SIDE_LANDMARK_MAP[side][name].value].x,
+                   landmarks[_SIDE_LANDMARK_MAP[side][name].value].y])
+        for name in names
+    ]
 
-    result = []
+
+def _get_primary_landmarks(landmarks, names):
+    """
+    Fetch the primary rep-counting angle's landmarks, ALL from the same side,
+    plus each point's visibility.
+
+    Previously the rep-counting angle picked each of its 3 points' side
+    independently (per-landmark, by that landmark's own visibility), which
+    could silently mix e.g. a left shoulder with a right elbow into a single
+    angle whenever their independent visibility scores crossed over between
+    frames — producing a corrupted angle that may never cleanly cross a rep
+    threshold, undercounting reps. This mirrors _get_side_landmarks' single,
+    consistent per-frame side decision instead.
+
+    Returns: (points, visibilities) — points as [x, y] lists, in `names` order.
+    """
+    side = _dominant_side(landmarks)
+    points, visibilities = [], []
     for name in names:
-        lm = landmarks[mapping[side][name].value]
-        result.append(np.array([lm.x, lm.y]))
-    return result
+        lm = landmarks[_SIDE_LANDMARK_MAP[side][name].value]
+        points.append([lm.x, lm.y])
+        visibilities.append(lm.visibility)
+    return points, visibilities
 
 
 # =============================================================================
@@ -953,12 +968,86 @@ def reset_state(exercise=None, session_id: str = None):
     st["last_stage_change_time"] = time.time()
     st["min_angle_this_rep"]    = 180
     st["angle_history"]         = []
+    st["consec_down"]           = 0
+    st["consec_up"]             = 0
     st["rep_start_time"]        = time.time()
     st["form_metrics"]          = {}
     st["form_violations"]       = []
     st["form_violation_history"] = {}
     if exercise:
         st["current_exercise"] = exercise
+
+
+def _advance_rep_state(st, sn, sess, angle, current_time, config, current_exercise) -> bool:
+    """
+    Core rep-counting state machine: REST(None) -> up -> down -> up (+1 rep).
+
+    Isolated from MediaPipe/frame IO on purpose so it can be driven with
+    synthetic angle sequences in unit tests (tests/test_rep_counting.py) —
+    it only reads/writes the `st`/`sn` dicts and the exercise config, no
+    camera or video frame involved.
+
+    Each stage transition requires CONFIRM_FRAMES consecutive calls with the
+    angle past the relevant threshold before it commits — a single noisy
+    angle sample right at a boundary can no longer flip (or fail to flip)
+    the stage by itself. `cooldown` is a residual wall-clock sanity floor
+    against pathological sensor glitches, not the primary anti-jitter guard.
+
+    Mutates st/sn in place. Returns True if this call completed the target
+    number of reps for the set (caller should stop processing that frame).
+    """
+    past_up   = angle > config["up_angle"]
+    past_down = angle < config["down_angle"]
+
+    if st["stage"] is None:
+        if past_up:
+            st["stage"] = "up"
+            sn["rep_start_time"] = current_time
+            _reset_rep_form_tracking(sess)
+
+    elif st["stage"] == "up":
+        st["consec_down"] = st["consec_down"] + 1 if past_down else 0
+        if st["consec_down"] >= CONFIRM_FRAMES:
+            st["stage"]                  = "down"
+            st["last_stage_change_time"] = current_time
+            st["consec_down"]            = 0
+
+    elif st["stage"] == "down":
+        st["consec_up"] = st["consec_up"] + 1 if past_up else 0
+        if st["consec_up"] >= CONFIRM_FRAMES:
+            if current_time - st["last_rep_time"] > st["cooldown"]:
+                # ── REP COMPLETED ─────────────────────────────────────────
+                st["counter"]               += 1
+                st["last_rep_time"]          = current_time
+                st["last_stage_change_time"] = current_time
+
+                st["ai_feedback"] = get_ai_feedback(
+                    st["min_angle_this_rep"], current_exercise, config
+                )
+
+                if sn["active"]:
+                    sn["current_set_depths"].append(st["min_angle_this_rep"])
+                    rep_time = current_time - (sn["rep_start_time"] or current_time)
+                    sn["current_set_rep_times"].append(round(rep_time, 2))
+
+                    rep_score = compute_rep_form_score(
+                        current_exercise, st["form_violation_history"]
+                    )
+                    sn["current_set_form_scores"].append(rep_score)
+                    sn["rep_start_time"] = current_time
+
+                    if st["counter"] >= sn["target_reps"]:
+                        complete_set(sess)
+                        return True
+
+            # Reset min-angle and form tracking on any confirmed down->up
+            # crossing (whether or not cooldown allowed the rep count).
+            st["min_angle_this_rep"] = 180
+            st["stage"]              = "up"
+            st["consec_up"]          = 0
+            _reset_rep_form_tracking(sess)
+
+    return False
 
 
 # =============================================================================
@@ -1103,9 +1192,9 @@ def process_frame(frame, session_id: str = None):
     if result.pose_landmarks:
         landmarks = result.pose_landmarks.landmark
 
-        (p1, v1) = get_landmark(landmarks, config["points"][0])
-        (p2, v2) = get_landmark(landmarks, config["points"][1])
-        (p3, v3) = get_landmark(landmarks, config["points"][2])
+        primary_points, primary_vis = _get_primary_landmarks(landmarks, config["points"])
+        (p1, p2, p3) = primary_points
+        (v1, v2, v3) = primary_vis
 
         if v1 > 0.5 and v2 > 0.5 and v3 > 0.5:
             raw_angle = calculate_angle(p1, p2, p3)
@@ -1140,64 +1229,8 @@ def process_frame(frame, session_id: str = None):
                     st["form_violations"] = []
 
                 # ── STATE MACHINE ─────────────────────────────────────────
-                # transition_handled prevents the "update stage" fallback at
-                # the bottom from immediately undoing a transition on the
-                # same boundary frame.
-                transition_handled = False
-
-                if st["stage"] is None:
-                    if angle > config["up_angle"]:
-                        st["stage"] = "up"
-                        sn["rep_start_time"] = current_time
-                        _reset_rep_form_tracking(sess)
-                        transition_handled = True
-
-                if not transition_handled and st["stage"] == "up" \
-                        and angle < config["down_angle"]:
-                    st["stage"] = "down"
-                    st["last_stage_change_time"] = current_time
-                    transition_handled = True
-
-                elif not transition_handled and st["stage"] == "down" \
-                        and angle > config["up_angle"]:
-
-                    if current_time - st["last_rep_time"] > st["cooldown"]:
-                        # ── REP COMPLETED ─────────────────────────────────
-                        st["counter"]               += 1
-                        st["last_rep_time"]          = current_time
-                        st["last_stage_change_time"] = current_time
-
-                        st["ai_feedback"] = get_ai_feedback(
-                            st["min_angle_this_rep"], current_exercise, config
-                        )
-
-                        if sn["active"]:
-                            sn["current_set_depths"].append(st["min_angle_this_rep"])
-                            rep_time = current_time - (sn["rep_start_time"] or current_time)
-                            sn["current_set_rep_times"].append(round(rep_time, 2))
-
-                            rep_score = compute_rep_form_score(
-                                current_exercise, st["form_violation_history"]
-                            )
-                            sn["current_set_form_scores"].append(rep_score)
-                            sn["rep_start_time"] = current_time
-
-                            if st["counter"] >= sn["target_reps"]:
-                                complete_set(sess)
-                                return frame, st
-
-                    # Reset min-angle and form tracking on any down→up crossing
-                    # (whether or not cooldown allowed the rep count).
-                    st["min_angle_this_rep"] = 180
-                    st["stage"]              = "up"
-                    _reset_rep_form_tracking(sess)
-                    transition_handled = True
-
-                if not transition_handled:
-                    if angle > config["up_angle"]:
-                        st["stage"] = "up"
-                    elif angle < config["down_angle"]:
-                        st["stage"] = "down"
+                if _advance_rep_state(st, sn, sess, angle, current_time, config, current_exercise):
+                    return frame, st
 
                 # ── MOTION FEEDBACK ───────────────────────────────────────
                 if st["counter"] > 0 and current_time - st["last_rep_time"] > 5:

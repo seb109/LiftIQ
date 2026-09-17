@@ -38,10 +38,10 @@
         80
       ],
       "corrections": {
-        "event_count": 176,
+        "event_count": 172,
         "messages": {
-          "Squeeze your core \u2014 hips are sagging!": 55,
-          "Tuck your elbows \u2014 about 45\u00b0 from your body!": 121
+          "Squeeze your core \u2014 hips are sagging!": 54,
+          "Tuck your elbows \u2014 about 45\u00b0 from your body!": 118
         }
       }
     },
@@ -94,10 +94,9 @@
       "source_frame_count": 833,
       "processed_frame_count": 833,
       "duration_seconds": 27.767,
-      "reps": 2,
+      "reps": 1,
       "form_score": 80.0,
       "per_rep_form_scores": [
-        80,
         80
       ],
       "corrections": {
