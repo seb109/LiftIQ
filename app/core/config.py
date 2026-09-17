@@ -1,5 +1,8 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Checked-in development-only default. Never valid for a production deployment.
+_INSECURE_DEFAULT_SECRET_KEY = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
+
 
 class Settings(BaseSettings):
     # ── Database ─────────────────────────────────────────────────────────────
@@ -10,7 +13,7 @@ class Settings(BaseSettings):
     # ── Security ──────────────────────────────────────────────────────────────
     # Override with a securely generated value in production.
     # Generate: python -c "import secrets; print(secrets.token_hex(32))"
-    SECRET_KEY: str = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
+    SECRET_KEY: str = _INSECURE_DEFAULT_SECRET_KEY
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
@@ -33,3 +36,10 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+if settings.ENVIRONMENT == "production" and settings.SECRET_KEY == _INSECURE_DEFAULT_SECRET_KEY:
+    raise RuntimeError(
+        "SECRET_KEY is unset or still the checked-in development default. "
+        "Refusing to start with ENVIRONMENT=production — set a unique SECRET_KEY "
+        "(python -c \"import secrets; print(secrets.token_hex(32))\")."
+    )

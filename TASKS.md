@@ -1,7 +1,24 @@
 # Project Progress & Task Checklist
 
+### Milestone 7: Final QA + Production Hardening
+- **Status:** ✅ Complete
+- **Description:** Full baseline audit, automated test verification, security/CORS/env audit, database/persistence smoke test, and targeted production-hardening fixes. No new product features, no CV/architecture changes.
+- **Verified (no changes needed):** 37/37 backend pytest, 22/22 frontend tests, `npm run build` clean, CV regression baselines match, Docker images build clean, Alembic `001_initial_schema` applied and idempotent, full register→login→start→stop→persist→history→report→ownership-isolation→logout→revoke→relogin→persist flow smoke-tested against the Dockerized stack via curl, CORS correctly rejects unauthorized origins, 404/422 error paths clean (no stack traces/secrets leaked), password hashing (bcrypt) and refresh token hashing (SHA-256) confirmed, GROQ_API_KEY never referenced in frontend code.
+- **Fixed:**
+  - `app/core/config.py`: `SECRET_KEY` previously had a hardcoded fallback with no startup guard — a production deploy missing the env var would have silently booted with the checked-in default (JWT forgery risk). Now raises `RuntimeError` at import time if `ENVIRONMENT=production` and `SECRET_KEY` is still the default.
+  - `app/db/session.py`: SQLite fallback was gated only on `APP_ENV=docker`; a bare `ENVIRONMENT=production` deploy without `APP_ENV` set could have silently fallen back to SQLite on a transient Postgres connection failure. Now also hard-fails when `settings.ENVIRONMENT == "production"`.
+- **Known limitations / not fixed (documented, not blocking):**
+  - `/stats`, `/get_set_feedback`, `/ws/webcam` remain unauthenticated by design (backward-compat decision from Milestone 4) — a known `session_id` UUID lets a third party poll/inject into a live session. Left as-is; fixing requires WS auth-handshake design work out of this milestone's "no redesign" scope.
+  - Frontend still uses `localStorage` for token storage (accepted tradeoff, not changed per milestone instructions).
+  - `/history`, `/history/[sessionId]`, `/reports/[reportId]` frontend routes do not exist — Milestone 6B explicitly deferred them. This milestone's QA scope was adjusted to the routes that actually exist (`/`, `/login`, `/register`, `/workout`) rather than building them, per "no new product features."
+  - `shoulder_press` still has no regression baseline video (`CANONICAL_VIDEOS["shoulder_press"] = None`).
+  - Live browser camera/WebSocket workout flow was not manually verified in this session (no browser/display tooling available) — REST-level session lifecycle was fully verified instead.
+  - `scratch/test_postgres.py` contained a local Postgres password-guessing script — flagged to the user and removed with their confirmation.
+
+---
+
 ### Infrastructure Hardening: Local Docker + PostgreSQL Setup
-- **Status:** 🔄 In Progress (pauses Milestone 6D)
+- **Status:** ✅ Complete (commit: `5bd9461`)
 - **Description:** Dockerized the full LiftIQ local development stack with a real PostgreSQL 16 database. Frontend locked to port 3001. Backend on 8000. PostgreSQL mapped to host port 5433 (5432 occupied by a separate local install). CORS updated to remove localhost:3000 references. WebSocket URL remains browser-resolvable via NEXT_PUBLIC_API_URL. Alembic migration workflow documented. Milestone 6C live workout must remain functional after Dockerization.
 - **Changes:**
   - `requirements.txt`: Added `psycopg2-binary` (PostgreSQL driver) and `pydantic-settings`
