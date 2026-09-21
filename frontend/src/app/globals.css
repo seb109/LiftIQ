@@ -1,40 +1,203 @@
 @import "tailwindcss";
 
+/*
+ * LiftIQ design tokens.
+ *
+ * Two surfaces, one vocabulary:
+ *   log   (default)  warm paper, for reading and logging: dashboard, history, reports, forms
+ *   stage (.stage)   graphite, for the live workout only, where the camera feed is the content
+ *                    and numbers must be legible from a few metres away
+ *
+ * Components use the semantic utilities below (bg-canvas, text-ink, border-rule, bg-brand ...).
+ * Never use raw hex values or Tailwind palette colours in components; the .stage class
+ * re-points the same variables, so a component written once works on both surfaces.
+ */
+
+:root {
+  color-scheme: light;
+
+  --canvas: #F1EEE6;        /* page */
+  --surface: #FAF8F3;       /* raised: forms, tables, panels */
+  --sunken: #E9E5DA;        /* inset wells, table headers, skeleton blocks */
+  --ink: #1B211E;           /* primary text */
+  --ink-2: #5A625D;         /* secondary text, placeholders */
+  --rule: #CFC9BA;          /* hairlines and dividers */
+  --rule-strong: #8C8676;   /* control boundaries (3:1 against canvas and surface) */
+
+  --brand: #1F5A45;         /* pine: primary action, links, and "good form" */
+  --brand-hover: #184A39;
+  --brand-press: #123B2D;
+  --on-brand: #F7F5EF;
+  --brand-tint: #DCE6DE;    /* selected rows and options */
+
+  --pass: #1F5A45;          /* score states; always paired with a word and a glyph */
+  --caution: #8A5A0B;
+  --caution-tint: #F0E2C6;
+  --fail: #A3301F;
+  --fail-hover: #8B2718;
+  --fail-tint: #F1D9D3;
+  --on-fail: #F7F5EF;
+
+  --overlay: rgb(27 33 30 / 0.55);  /* scrim behind dialogs; no blur */
+}
+
+.stage {
+  color-scheme: dark;
+
+  --canvas: #141816;
+  --surface: #1C211E;
+  --sunken: #0F1311;
+  --ink: #ECE9E1;
+  --ink-2: #A9AFA9;
+  --rule: #2E3531;
+  --rule-strong: #6A746E;
+
+  --brand: #6CC49A;
+  --brand-hover: #82D0AB;
+  --brand-press: #57AE85;
+  --on-brand: #0F1311;
+  --brand-tint: #22332B;
+
+  --pass: #6CC49A;
+  --caution: #E3AE45;
+  --caution-tint: #3A2E14;
+  --fail: #EE7D6B;
+  --fail-hover: #F39584;
+  --fail-tint: #3C1F1A;
+  --on-fail: #0F1311;
+
+  --overlay: rgb(8 10 9 / 0.7);
+}
+
+@theme inline {
+  /* Remove Tailwind's default palette so the semantic tokens below are the only colours available.
+     A stray zinc-900 or lime-400 now produces no style at all and is caught in review, not shipped. */
+  --color-*: initial;
+
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-sunken: var(--sunken);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-press: var(--brand-press);
+  --color-on-brand: var(--on-brand);
+  --color-brand-tint: var(--brand-tint);
+  --color-pass: var(--pass);
+  --color-caution: var(--caution);
+  --color-caution-tint: var(--caution-tint);
+  --color-fail: var(--fail);
+  --color-fail-hover: var(--fail-hover);
+  --color-fail-tint: var(--fail-tint);
+  --color-on-fail: var(--on-fail);
+  --color-overlay: var(--overlay);
+}
+
+@theme {
+  /* Type: Archivo for UI and headings, Archivo Narrow for counters, Newsreader for the coach's voice. */
+  --font-sans: var(--font-archivo, ui-sans-serif), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-archivo-narrow, ui-sans-serif), var(--font-archivo, ui-sans-serif), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-newsreader, Georgia), Georgia, "Times New Roman", serif;
+
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 1rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.625rem;
+  --text-xl: 1.375rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.75rem;
+  --text-2xl--line-height: 2.125rem;
+  --text-3xl: 2.25rem;
+  --text-3xl--line-height: 2.5rem;
+  --text-stat: 3.5rem;             /* dashboard and summary figures */
+  --text-stat--line-height: 1;
+  --text-counter: 8rem;            /* live rep count */
+  --text-counter--line-height: 1;
+
+  /* Radius system: controls, surfaces, camera media. Circles only for genuinely round things. */
+  --radius-control: 2px;
+  --radius-surface: 4px;
+  --radius-media: 8px;
+
+  /* One elevation, for overlays that sit above the page (dialogs, menus). Nothing else casts a shadow. */
+  --shadow-overlay: 0 16px 40px -12px rgb(20 24 22 / 0.35), 0 2px 6px rgb(20 24 22 / 0.14);
+
+  /* State changes only: hover, focus, press. Short and quiet. */
+  --default-transition-duration: 140ms;
+  --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
 @layer base {
-  :root {
-    --bg-primary: #09090B;
-    --bg-surface: #111827;
-    --bg-card: #18181B;
-    --bg-elevated: #27272A;
-    --border-color: #27272A;
-    --text-primary: #F8FAFC;
-    --text-secondary: #94A3B8;
-    --accent-lime: #A3E635;
-    --accent-lime-hover: #84CC16;
+  html {
+    background-color: var(--canvas);
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
+  }
+
+  ::selection {
+    background-color: var(--brand-tint);
+    color: var(--ink);
+  }
+
+  /* One focus treatment everywhere; visible for keyboard use only. */
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+  }
+
+  button,
+  [role="button"],
+  summary {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  * {
+    scrollbar-color: var(--rule-strong) transparent;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
-body {
-  background-color: var(--bg-primary);
-  color: var(--text-primary);
-  font-family: var(--font-sans, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif);
-  min-height: 100vh;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+@layer utilities {
+  /* Skeleton placeholder: a flat block that dims in and out. No shimmer gradient. */
+  .skeleton {
+    background-color: var(--sunken);
+    border-radius: var(--radius-control);
+    animation: skeleton-dim 1.6s ease-in-out infinite;
+  }
 
-/* Custom scrollbars */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: #09090B;
-}
-::-webkit-scrollbar-thumb {
-  background: #27272A;
-  border-radius: 4px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #3F3F46;
+  @keyframes skeleton-dim {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
 }

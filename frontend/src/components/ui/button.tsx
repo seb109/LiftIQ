@@ -1,67 +1,78 @@
 import React from 'react';
+import Link from 'next/link';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger';
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
   size?: 'sm' | 'md' | 'lg';
   isLoading?: boolean;
-  leftIcon?: React.ReactNode;
-  rightIcon?: React.ReactNode;
+  /** React 19 passes ref as an ordinary prop to function components. */
+  ref?: React.Ref<HTMLButtonElement>;
 }
+
+const base =
+  'inline-flex items-center justify-center gap-2 rounded-control font-medium select-none whitespace-nowrap ' +
+  'transition-colors disabled:cursor-not-allowed';
+
+// Every state changes colour, so the state is readable without any motion.
+const variants = {
+  primary:
+    'bg-brand text-on-brand hover:bg-brand-hover active:bg-brand-press ' +
+    'disabled:bg-sunken disabled:text-ink-2',
+  secondary:
+    'border border-rule-strong bg-surface text-ink hover:bg-sunken active:bg-rule ' +
+    'disabled:border-rule disabled:text-ink-2 disabled:hover:bg-surface',
+  ghost:
+    'text-ink-2 hover:bg-sunken hover:text-ink active:bg-rule disabled:text-ink-2/60 disabled:hover:bg-transparent',
+  danger:
+    'bg-fail text-on-fail hover:bg-fail-hover active:bg-fail disabled:bg-sunken disabled:text-ink-2',
+};
+
+const sizes = {
+  sm: 'h-8 px-3 text-sm',
+  md: 'h-10 px-4 text-sm',
+  lg: 'h-12 px-6 text-base',
+};
 
 export const Button: React.FC<ButtonProps> = ({
   children,
   variant = 'primary',
   size = 'md',
   isLoading = false,
-  leftIcon,
-  rightIcon,
   className,
   disabled,
+  type = 'button',
   ...props
-}) => {
-  const baseStyles = 'inline-flex items-center justify-center font-medium rounded-xl transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-zinc-950 disabled:opacity-50 disabled:cursor-not-allowed select-none';
+}) => (
+  <button
+    type={type}
+    className={twMerge(clsx(base, variants[variant], sizes[size], className))}
+    disabled={disabled || isLoading}
+    aria-busy={isLoading || undefined}
+    {...props}
+  >
+    {isLoading && (
+      <svg className="size-4 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" opacity="0.25" />
+        <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+      </svg>
+    )}
+    {children}
+  </button>
+);
 
-  const variants = {
-    primary: 'bg-lime-400 text-zinc-950 hover:bg-lime-500 active:bg-lime-600 focus:ring-lime-400 font-semibold shadow-sm shadow-lime-400/10',
-    secondary: 'bg-zinc-800 text-slate-100 hover:bg-zinc-700 active:bg-zinc-600 focus:ring-zinc-500 border border-zinc-700/50',
-    outline: 'bg-transparent text-slate-200 border border-zinc-700 hover:bg-zinc-800/60 active:bg-zinc-800 focus:ring-zinc-400',
-    ghost: 'bg-transparent text-slate-400 hover:text-slate-100 hover:bg-zinc-800/50 focus:ring-zinc-500',
-    danger: 'bg-red-600 text-white hover:bg-red-500 active:bg-red-700 focus:ring-red-500 font-semibold',
-  };
+type ButtonStyleOptions = { variant?: keyof typeof variants; size?: keyof typeof sizes; className?: string };
 
-  const sizes = {
-    sm: 'px-3 py-1.5 text-xs gap-1.5 h-8',
-    md: 'px-4 py-2.5 text-sm gap-2 h-11',
-    lg: 'px-6 py-3 text-base gap-2.5 h-13',
-  };
+/** Button styling for elements that are not <button>, such as links that navigate. */
+export function buttonStyles({ variant = 'primary', size = 'md', className }: ButtonStyleOptions = {}) {
+  return twMerge(clsx(base, variants[variant], sizes[size], className));
+}
 
-  return (
-    <button
-      className={twMerge(clsx(baseStyles, variants[variant], sizes[size], className))}
-      disabled={disabled || isLoading}
-      {...props}
-    >
-      {isLoading ? (
-        <svg
-          className="animate-spin h-4 w-4 text-current shrink-0"
-          xmlns="http://www.w3.org/2000/svg"
-          fill="none"
-          viewBox="0 0 24 24"
-        >
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path
-            className="opacity-75"
-            fill="currentColor"
-            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-          />
-        </svg>
-      ) : (
-        leftIcon && <span className="shrink-0">{leftIcon}</span>
-      )}
-      <span>{children}</span>
-      {!isLoading && rightIcon && <span className="shrink-0">{rightIcon}</span>}
-    </button>
-  );
-};
+/** A link that looks like a button. Use it for navigation; use Button for actions. */
+export const ButtonLink: React.FC<React.ComponentProps<typeof Link> & ButtonStyleOptions> = ({
+  variant,
+  size,
+  className,
+  ...props
+}) => <Link className={buttonStyles({ variant, size, className })} {...props} />;

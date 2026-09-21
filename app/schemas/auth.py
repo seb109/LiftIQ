@@ -8,6 +8,16 @@ class UserRegisterRequest(BaseModel):
     password: str = Field(..., min_length=8, description="User password (min 8 chars)")
     name: Optional[str] = Field(None, description="User display name")
     full_name: Optional[str] = Field(None, description="Alias for name")
+    accept_terms: bool = Field(
+        ..., description="Must be true: the user accepts the Terms of Service and Privacy Policy"
+    )
+
+    @field_validator("accept_terms")
+    @classmethod
+    def require_terms_acceptance(cls, v: bool) -> bool:
+        if v is not True:
+            raise ValueError("You must accept the Terms of Service and Privacy Policy to create an account")
+        return v
 
     @field_validator("email")
     @classmethod

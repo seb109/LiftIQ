@@ -22,6 +22,7 @@ from app.api.deps import get_current_user
 from app.core import ws_perf
 from app.core.config import settings
 from app.core.security import decode_access_token
+from app.core.upload_limit import UploadGuardMiddleware
 from app.db.session import get_db
 from app.models.user import User
 from app.models.workout_session import WorkoutSession
@@ -73,6 +74,10 @@ for _origin in settings.FRONTEND_URL.split(","):
     if _origin and _origin not in _cors_origins:
         _cors_origins.append(_origin)
 
+# Added before CORSMiddleware so CORS wraps it: its 401/413 answers still carry CORS headers.
+# The limit is read on every request so it can be changed (and tested) at runtime.
+app.add_middleware(UploadGuardMiddleware, path="/upload_video", max_bytes=lambda: MAX_UPLOAD_BYTES)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
@@ -97,6 +102,11 @@ templates = Jinja2Templates(directory="templates")
 
 
 uploaded_video_paths: dict[str, str] = {}
+
+# Legacy /upload_video limits.
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+UPLOAD_CHUNK_BYTES = 1024 * 1024
+ALLOWED_VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"})
 
 # ----------- PAGES ----------- #
 
@@ -124,28 +134,36 @@ async def version():
 
 # ----------- SESSION ----------- #
 
+# Legacy session endpoints. They now require a signed-in user who owns `session_id` (a
+# WorkoutSession row created through POST /api/v1/sessions/start). They are plain `def`
+# handlers so FastAPI runs them, and their database ownership check, on the thread pool
+# instead of blocking the event loop.
+
 @app.post("/start_session")
-async def start_session(data: dict):
+def start_session(
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    session_id = data.get("session_id")
+    _require_owned_session(session_id, current_user, db)
     exercise = data.get("exercise", "squat")
     target_reps = int(data.get("target_reps", 10))
     target_sets = int(data.get("target_sets", 3))
-    session_id = data.get("session_id") or uuid.uuid4().hex
     gt.start_session(exercise, target_reps, target_sets, session_id=session_id)
     return JSONResponse({"status": "ok", "session_id": session_id})
 
 
 @app.post("/end_session")
-async def end_session(data: dict):
+def end_session(
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     session_id = data.get("session_id")
-    if session_id:
-        gt.end_session(session_id)
-        if session_id in uploaded_video_paths:
-            vpath = uploaded_video_paths.pop(session_id, None)
-            if vpath and os.path.exists(vpath):
-                try:
-                    os.remove(vpath)
-                except Exception:
-                    pass
+    _require_owned_session(session_id, current_user, db)
+    gt.end_session(session_id)
+    _discard_uploaded_video(session_id)
     return JSONResponse({"status": "ok"})
 
 
@@ -164,6 +182,31 @@ def _require_owned_session(session_id: Optional[str], current_user: User, db: Se
     session_entity = db.query(WorkoutSession).filter(WorkoutSession.id == session_uuid).first()
     if not session_entity or session_entity.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout session not found.")
+
+
+def _owned_session_id(
+    session_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> str:
+    """Dependency: the `session_id` query parameter, once the caller is signed in and owns it.
+
+    A plain `def`, so FastAPI runs it (and its database query) on the thread pool rather than
+    on the event loop. Raises 401 without valid credentials and 404 for a missing, malformed
+    or foreign session id.
+    """
+    _require_owned_session(session_id, current_user, db)
+    return session_id
+
+
+def _discard_uploaded_video(session_id: str) -> None:
+    """Delete and forget the temporary upload recorded for `session_id`, if any."""
+    path = uploaded_video_paths.pop(session_id, None)
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError:
+            logger.warning("Could not remove temporary upload %s", path)
 
 
 @app.get("/stats")
@@ -240,7 +283,7 @@ async def trigger_set_feedback(
             feedback = await ai.get_set_feedback(feedback_session)
         except Exception:
             logger.exception("Groq set-feedback call failed; continuing without AI feedback")
-            feedback = "Feedback unavailable right now — your set was recorded, keep going."
+            feedback = "Feedback unavailable right now. Your set was recorded, keep going."
         s["set_feedback"] = feedback
 
         all_sets_done = (
@@ -253,7 +296,7 @@ async def trigger_set_feedback(
                 summary = await ai.get_session_summary(s)
             except Exception:
                 logger.exception("Groq session-summary call failed; continuing without AI summary")
-                summary = "Session summary unavailable right now — your workout was recorded."
+                summary = "Session summary unavailable right now. Your workout was recorded."
             s["session_summary"] = summary
 
         return JSONResponse({"feedback": feedback})
@@ -284,7 +327,7 @@ def webcam_stream(session_id: str = None):
 
 
 @app.get("/webcam_feed")
-async def webcam_feed(session_id: str = None):
+async def webcam_feed(session_id: str = Depends(_owned_session_id)):
     return StreamingResponse(
         webcam_stream(session_id=session_id),
         media_type="multipart/x-mixed-replace;boundary=frame"
@@ -431,20 +474,62 @@ def video_stream(video_path: str, session_id: str = None):
             uploaded_video_paths.pop(session_id, None)
 
 
+async def _save_upload_to_temp(file: UploadFile, max_bytes: int) -> str:
+    """Stream `file` to a temporary file in chunks and return its path.
+
+    Rejects unsupported extensions (415) before writing anything, and files larger than
+    `max_bytes` (413) as soon as the limit is crossed. On any failure the partial file is
+    deleted before the error propagates, so a rejected upload never leaves debris behind.
+    """
+    suffix = os.path.splitext(file.filename or "")[1].lower()
+    if suffix not in ALLOWED_VIDEO_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Unsupported video type. Use one of: " + ", ".join(sorted(ALLOWED_VIDEO_EXTENSIONS)) + ".",
+        )
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    path = tmp.name
+    try:
+        written = 0
+        while True:
+            chunk = await file.read(UPLOAD_CHUNK_BYTES)
+            if not chunk:
+                break
+            written += len(chunk)
+            if written > max_bytes:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=f"Upload is too large (limit {max_bytes // (1024 * 1024)} MB).",
+                )
+            # File writes are blocking; keep them off the event loop.
+            await asyncio.to_thread(tmp.write, chunk)
+        tmp.close()
+        return path
+    except BaseException:
+        tmp.close()
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        raise
+
+
 @app.post("/upload_video")
-async def upload_video(file: UploadFile = File(...), session_id: str = None):
-    sid = session_id or gt.DEFAULT_SESSION_ID
-    suffix = os.path.splitext(file.filename)[1]
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(await file.read())
-        uploaded_video_paths[sid] = tmp.name
+async def upload_video(
+    file: UploadFile = File(...),
+    sid: str = Depends(_owned_session_id),
+):
+    path = await _save_upload_to_temp(file, MAX_UPLOAD_BYTES)
+    # A new upload replaces any earlier one for this session; do not leak the old temp file.
+    _discard_uploaded_video(sid)
+    uploaded_video_paths[sid] = path
     gt.reset_state(session_id=sid)
     return JSONResponse({"status": "ok", "session_id": sid})
 
 
 @app.get("/uploaded_feed")
-async def uploaded_feed(session_id: str = None):
-    sid = session_id or gt.DEFAULT_SESSION_ID
+async def uploaded_feed(sid: str = Depends(_owned_session_id)):
     vpath = uploaded_video_paths.get(sid)
     if not vpath:
         return JSONResponse({"error": "No video uploaded for this session"})

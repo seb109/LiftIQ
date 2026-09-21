@@ -15,8 +15,8 @@
       "corrections": {
         "event_count": 349,
         "messages": {
-          "Chest up \u2014 you're leaning too far forward!": 174,
-          "Push knees out \u2014 they're caving in!": 175
+          "Chest up, you're leaning too far forward!": 174,
+          "Push knees out, they're caving in!": 175
         }
       }
     },
@@ -40,8 +40,8 @@
       "corrections": {
         "event_count": 172,
         "messages": {
-          "Squeeze your core \u2014 hips are sagging!": 54,
-          "Tuck your elbows \u2014 about 45\u00b0 from your body!": 118
+          "Squeeze your core, hips are sagging!": 54,
+          "Tuck your elbows, about 45 degrees from your body!": 118
         }
       }
     },
@@ -64,8 +64,8 @@
       "corrections": {
         "event_count": 1632,
         "messages": {
-          "Pin your elbow to your side \u2014 don't let it drift!": 815,
-          "Stop swinging \u2014 keep your torso locked!": 817
+          "Pin your elbow to your side, don't let it drift!": 815,
+          "Stop swinging, keep your torso locked!": 817
         }
       }
     },
@@ -82,8 +82,8 @@
       "corrections": {
         "event_count": 666,
         "messages": {
-          "Drive your knee over your toe \u2014 it's caving in!": 418,
-          "Keep your chest up \u2014 don't lean forward!": 248
+          "Drive your knee over your toe, it's caving in!": 418,
+          "Keep your chest up, don't lean forward!": 248
         }
       }
     },
@@ -102,7 +102,7 @@
       "corrections": {
         "event_count": 340,
         "messages": {
-          "Keep your back flat \u2014 hinge from the hips, not the spine!": 340
+          "Keep your back flat, hinge from the hips, not the spine!": 340
         }
       }
     },

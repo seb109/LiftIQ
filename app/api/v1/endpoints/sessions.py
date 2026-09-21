@@ -147,11 +147,14 @@ async def _process_end_session(session_id_str: str, current_user: User, db: Sess
     if total_reps == 0:
         total_reps = sess.state.get("counter", 0)
 
-    # Calculate form score
-    all_depths = []
+    # Form score = the engine's own 0-100 per-rep score (gym_trainer.compute_rep_form_score),
+    # which complete_set() stores in each set's "form_scores". "depths" are joint angles in
+    # DEGREES, a different quantity that must never be persisted as a score (a perfect bicep
+    # curl reaches about 45 degrees, not "45%"). Missing or short "form_scores" gives None.
+    all_form_scores = []
     for s in completed_sets:
-        all_depths.extend(s.get("depths", []))
-    avg_form_score = round(float(sum(all_depths) / len(all_depths)), 1) if all_depths else None
+        all_form_scores.extend(float(x) for x in (s.get("form_scores") or []) if x is not None)
+    avg_form_score = round(sum(all_form_scores) / len(all_form_scores), 1) if all_form_scores else None
 
     # Build metric entities
     metrics_to_create = []
@@ -159,15 +162,19 @@ async def _process_end_session(session_id_str: str, current_user: User, db: Sess
     for set_info in completed_sets:
         set_num = set_info.get("set_number", 1)
         depths = set_info.get("depths", [])
-        for d in depths:
+        form_scores = set_info.get("form_scores") or []
+        for i, d in enumerate(depths):
+            rep_score = float(form_scores[i]) if i < len(form_scores) and form_scores[i] is not None else None
+            # The note wording is also what alembic revision 003 uses to tell rows written by the
+            # old code (which stored degrees as the score) from correct ones. Change both together.
             metric = ExerciseMetric(
                 id=uuid.uuid4(),
                 session_id=session_entity.id,
                 timestamp=now,
                 rep_number=rep_counter,
                 stage="complete",
-                form_score=float(d),
-                correction_message=f"Set {set_num} rep depth score {d:.1f}%"
+                form_score=rep_score,
+                correction_message=f"Set {set_num} rep depth {d:.1f} degrees"
             )
             metrics_to_create.append(metric)
             rep_counter += 1

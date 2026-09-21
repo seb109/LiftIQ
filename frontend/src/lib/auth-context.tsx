@@ -6,6 +6,7 @@ import {
   LoginRequest,
   RegisterRequest,
   authApi,
+  apiErrorMessage,
   getStoredAccessToken,
   clearStoredTokens,
 } from './api';
@@ -67,8 +68,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else {
         throw new Error(response.message || 'Login failed');
       }
-    } catch (err: any) {
-      const msg = err.response?.data?.detail || err.response?.data?.message || err.message || 'Invalid email or password';
+    } catch (err: unknown) {
+      const msg = apiErrorMessage(err, 'Invalid email or password');
       setError(msg);
       setStatus('unauthenticated');
       throw new Error(msg);
@@ -85,8 +86,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else {
         throw new Error(response.message || 'Registration failed');
       }
-    } catch (err: any) {
-      const msg = err.response?.data?.detail || err.response?.data?.message || err.message || 'Registration failed';
+    } catch (err: unknown) {
+      const msg = apiErrorMessage(err, 'Registration failed');
       setError(msg);
       throw new Error(msg);
     }

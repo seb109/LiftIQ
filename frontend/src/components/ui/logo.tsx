@@ -1,37 +1,17 @@
 import React from 'react';
+import { LiftMark } from './icons';
 
 interface LogoProps {
   size?: 'sm' | 'md' | 'lg';
-  showSubtitle?: boolean;
   className?: string;
 }
 
-export const Logo: React.FC<LogoProps> = ({ size = 'md', showSubtitle = false, className = '' }) => {
-  const sizeClasses = {
-    sm: 'text-lg',
-    md: 'text-2xl',
-    lg: 'text-4xl',
-  };
+const text = { sm: 'text-lg', md: 'text-xl', lg: 'text-3xl' };
+const mark = { sm: 'size-5', md: 'size-6', lg: 'size-8' };
 
-  const badgeSizes = {
-    sm: 'px-1.5 py-0.5 text-xs',
-    md: 'px-2 py-0.5 text-sm',
-    lg: 'px-2.5 py-1 text-base',
-  };
-
-  return (
-    <div className={`inline-flex flex-col ${className}`}>
-      <div className={`font-extrabold tracking-tight flex items-center gap-1 ${sizeClasses[size]}`}>
-        <span className="text-slate-50 font-sans tracking-tight">Lift</span>
-        <span className={`bg-lime-400 text-zinc-950 font-black rounded-md ${badgeSizes[size]} tracking-wider uppercase font-mono`}>
-          IQ
-        </span>
-      </div>
-      {showSubtitle && (
-        <span className="text-[10px] uppercase font-mono tracking-widest text-slate-400 mt-1 font-semibold">
-          Intelligent Training Infrastructure
-        </span>
-      )}
-    </div>
-  );
-};
+export const Logo: React.FC<LogoProps> = ({ size = 'md', className = '' }) => (
+  <span className={`inline-flex items-center gap-2 text-ink ${className}`}>
+    <LiftMark className={`${mark[size]} text-brand`} />
+    <span className={`font-bold tracking-tight ${text[size]}`}>LiftIQ</span>
+  </span>
+);

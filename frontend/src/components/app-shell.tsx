@@ -6,89 +6,74 @@ import { usePathname } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { Logo } from '@/components/ui/logo';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { LogOut, User, Activity, History } from 'lucide-react';
+import { Skeleton, LoadingRegion } from '@/components/ui/skeleton';
+import { SiteFooter } from '@/components/site-footer';
+
+const NAV = [
+  { href: '/', label: 'Dashboard', match: (p: string) => p === '/' },
+  { href: '/history', label: 'History', match: (p: string) => p.startsWith('/history') || p.startsWith('/reports') },
+] as const;
 
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, logout } = useAuth();
-  const pathname = usePathname();
-  const isHistoryActive = pathname?.startsWith('/history');
+  const pathname = usePathname() ?? '/';
 
   return (
-    <div className="min-h-screen bg-[#09090B] text-slate-100 flex flex-col font-sans">
-      {/* Top Header Navigation Shell */}
-      <header className="sticky top-0 z-40 w-full border-b border-zinc-800/80 bg-zinc-950/80 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-6">
+    <div className="flex min-h-screen flex-col bg-canvas text-ink">
+      <header className="border-b border-rule bg-canvas">
+        <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-x-8 px-4 sm:px-6 lg:px-8">
+          <Link href="/" aria-label="LiftIQ dashboard" className="order-1 py-4">
             <Logo size="md" />
-            <nav className="hidden md:flex items-center gap-1">
-              <Link
-                href="/history"
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                  isHistoryActive
-                    ? 'bg-zinc-800 text-lime-400'
-                    : 'text-slate-400 hover:text-slate-100 hover:bg-zinc-800/50'
-                }`}
-              >
-                <History className="w-3.5 h-3.5" />
-                History
-              </Link>
-            </nav>
-            <div className="hidden md:flex items-center gap-2">
-              <Badge variant="lime" size="sm">
-                <span className="w-1.5 h-1.5 rounded-full bg-lime-400 animate-pulse mr-1.5 inline-block"></span>
-                MVP Engine v1.0
-              </Badge>
-            </div>
-          </div>
+          </Link>
 
-          <div className="flex items-center gap-4">
-            {user && (
-              <div className="flex items-center gap-3 bg-zinc-900/90 border border-zinc-800 rounded-xl px-3 py-1.5">
-                <div className="w-8 h-8 rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center text-lime-400 font-bold text-sm">
-                  {user.name ? user.name.charAt(0).toUpperCase() : <User className="w-4 h-4" />}
-                </div>
-                <div className="hidden sm:flex flex-col text-left">
-                  <span className="text-xs font-semibold text-slate-200 leading-none">{user.name || 'User'}</span>
-                  <span className="text-[10px] text-slate-400 font-mono mt-0.5 leading-none">{user.email}</span>
-                </div>
-              </div>
-            )}
+          <nav aria-label="Primary" className="order-3 -mb-px flex w-full gap-6 sm:order-2 sm:w-auto">
+            {NAV.map((item) => {
+              const active = item.match(pathname);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  aria-current={active ? 'page' : undefined}
+                  className={`border-b-2 py-3 text-sm font-medium transition-colors sm:py-4 ${
+                    active
+                      ? 'border-brand text-ink'
+                      : 'border-transparent text-ink-2 hover:border-rule-strong hover:text-ink'
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+          </nav>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={logout}
-              leftIcon={<LogOut className="w-3.5 h-3.5" />}
-              className="text-slate-300 hover:text-white"
-            >
-              <span className="hidden sm:inline">Logout</span>
+          <div className="order-2 ml-auto flex items-center gap-4 sm:order-3">
+            {user && <span className="hidden text-sm text-ink-2 sm:inline">{user.name || user.email}</span>}
+            <Button variant="secondary" size="sm" onClick={logout}>
+              Sign out
             </Button>
           </div>
         </div>
       </header>
 
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {children}
-      </main>
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-6 lg:px-8">{children}</main>
 
-      {/* Footer */}
-      <footer className="border-t border-zinc-800/60 bg-zinc-950/40 py-6">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400">
-          <div className="flex items-center gap-2">
-            <Activity className="w-4 h-4 text-lime-400" />
-            <span>LiftIQ &copy; {new Date().getFullYear()} Intelligent Training Infrastructure</span>
-          </div>
-          <div className="flex items-center gap-4 text-slate-400">
-            <span>FastAPI Backend</span>
-            <span>&bull;</span>
-            <span>MediaPipe Pose</span>
-            <span>&bull;</span>
-            <span>Groq AI Reports</span>
-          </div>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 };
+
+/** Stands in for the shell while the session is being verified, so the page does not jump on load. */
+export const AppShellSkeleton: React.FC = () => (
+  <LoadingRegion label="Loading" className="flex min-h-screen flex-col bg-canvas">
+    <div className="border-b border-rule">
+      <div className="mx-auto flex h-14 w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+        <Skeleton className="h-6 w-24" />
+        <Skeleton className="h-8 w-20" />
+      </div>
+    </div>
+    <div className="mx-auto w-full max-w-7xl flex-1 space-y-6 px-4 py-8 sm:px-6 lg:px-8">
+      <Skeleton className="h-8 w-64" />
+      <Skeleton className="h-40 w-full" />
+    </div>
+  </LoadingRegion>
+);

@@ -54,3 +54,9 @@ result of this reviewed fix, not a silent re-baseline:
   (same rep, same 80.0 form score). This was not independently verified
   against the source video's true rep count — recommend a visual spot check
   of `vids/deadlift/deadlift1.mp4` if that assurance is needed.
+
+**UI copy pass (text only):** correction and coaching messages in `gym_trainer.py` were reworded to remove
+em dashes and the degree sign (which OpenCV's bitmap fonts draw as `??`), and HUD units changed from `°` to `deg`.
+The baseline records correction messages by text, so only those message keys changed. Verified by running the harness on the
+reworded engine and comparing to the previous baseline with the same string mapping applied: reps, per-rep form scores,
+correction event counts and per-message counts were identical for every recorded exercise. No CV logic changed.

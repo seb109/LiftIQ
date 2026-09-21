@@ -50,7 +50,7 @@ def _jpeg(width: int = 640, height: int = 480) -> bytes:
 
 
 def _start_owned_session(client: TestClient, email: str) -> tuple[str, str]:
-    client.post("/api/v1/auth/register", json={"name": "WS Tester", "email": email, "password": "TestPassword123!"})
+    client.post("/api/v1/auth/register", json={"name": "WS Tester", "email": email, "password": "TestPassword123!", "accept_terms": True})
     token = client.post(
         "/api/v1/auth/login", json={"email": email, "password": "TestPassword123!"}
     ).json()["data"]["access_token"]

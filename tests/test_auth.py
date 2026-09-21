@@ -57,7 +57,8 @@ def test_successful_registration():
     payload = {
         "name": "Test User",
         "email": "test@example.com",
-        "password": "SecurePassword123!"
+        "password": "SecurePassword123!",
+        "accept_terms": True
     }
     response = client.post("/api/v1/auth/register", json=payload)
     assert response.status_code == 201
@@ -69,11 +70,50 @@ def test_successful_registration():
     assert "hashed_password" not in data["data"]["user"]
 
 
+def test_registration_records_terms_acceptance_time():
+    before = datetime.now(timezone.utc)
+    res = client.post("/api/v1/auth/register", json={
+        "name": "Terms User",
+        "email": "terms@example.com",
+        "password": "SecurePassword123!",
+        "accept_terms": True,
+    })
+    assert res.status_code == 201
+
+    db = TestingSessionLocal()
+    user = db.query(User).filter(User.email == "terms@example.com").first()
+    db.close()
+    assert user is not None
+    accepted = user.terms_accepted_at
+    assert accepted is not None
+    if accepted.tzinfo is None:  # SQLite drops tzinfo; Postgres keeps it
+        accepted = accepted.replace(tzinfo=timezone.utc)
+    assert before - timedelta(seconds=1) <= accepted <= datetime.now(timezone.utc) + timedelta(seconds=1)
+
+
+@pytest.mark.parametrize("extra", [{}, {"accept_terms": False}])
+def test_registration_requires_terms_acceptance(extra):
+    payload = {
+        "name": "No Terms",
+        "email": "noterms@example.com",
+        "password": "SecurePassword123!",
+        **extra,
+    }
+    res = client.post("/api/v1/auth/register", json=payload)
+    assert res.status_code == 422
+
+    db = TestingSessionLocal()
+    created = db.query(User).filter(User.email == "noterms@example.com").first()
+    db.close()
+    assert created is None
+
+
 def test_duplicate_email_rejection():
     payload = {
         "name": "User One",
         "email": "duplicate@example.com",
-        "password": "SecurePassword123!"
+        "password": "SecurePassword123!",
+        "accept_terms": True
     }
     res1 = client.post("/api/v1/auth/register", json=payload)
     assert res1.status_code == 201
@@ -86,7 +126,8 @@ def test_password_is_hashed_and_never_stored_plaintext():
     payload = {
         "name": "Hash User",
         "email": "hash@example.com",
-        "password": "MySecretPassword123!"
+        "password": "MySecretPassword123!",
+        "accept_terms": True
     }
     client.post("/api/v1/auth/register", json=payload)
 
@@ -102,13 +143,15 @@ def test_password_is_hashed_and_never_stored_plaintext():
 def test_successful_login():
     reg_payload = {
         "email": "login@example.com",
-        "password": "LoginPassword123!"
+        "password": "LoginPassword123!",
+        "accept_terms": True
     }
     client.post("/api/v1/auth/register", json=reg_payload)
 
     login_payload = {
         "email": "login@example.com",
-        "password": "LoginPassword123!"
+        "password": "LoginPassword123!",
+        "accept_terms": True
     }
     res = client.post("/api/v1/auth/login", json=login_payload)
     assert res.status_code == 200
@@ -122,13 +165,15 @@ def test_successful_login():
 def test_invalid_password_rejection():
     reg_payload = {
         "email": "wrongpwd@example.com",
-        "password": "LoginPassword123!"
+        "password": "LoginPassword123!",
+        "accept_terms": True
     }
     client.post("/api/v1/auth/register", json=reg_payload)
 
     login_payload = {
         "email": "wrongpwd@example.com",
-        "password": "WrongPassword123!"
+        "password": "WrongPassword123!",
+        "accept_terms": True
     }
     res = client.post("/api/v1/auth/login", json=login_payload)
     assert res.status_code == 401
@@ -137,7 +182,8 @@ def test_invalid_password_rejection():
 def test_access_jwt_claims():
     reg_payload = {
         "email": "jwt@example.com",
-        "password": "JwtPassword123!"
+        "password": "JwtPassword123!",
+        "accept_terms": True
     }
     client.post("/api/v1/auth/register", json=reg_payload)
     res = client.post("/api/v1/auth/login", json=reg_payload)
@@ -153,7 +199,8 @@ def test_protected_dependency_valid_token():
     reg_payload = {
         "name": "Protected User",
         "email": "protected@example.com",
-        "password": "ProtectedPassword123!"
+        "password": "ProtectedPassword123!",
+        "accept_terms": True
     }
     client.post("/api/v1/auth/register", json=reg_payload)
     res = client.post("/api/v1/auth/login", json=reg_payload)
@@ -177,7 +224,8 @@ def test_invalid_access_token_rejected():
 def test_expired_access_token_rejected():
     reg_payload = {
         "email": "expired@example.com",
-        "password": "ExpiredPassword123!"
+        "password": "ExpiredPassword123!",
+        "accept_terms": True
     }
     client.post("/api/v1/auth/register", json=reg_payload)
     db = TestingSessionLocal()
@@ -197,7 +245,8 @@ def test_expired_access_token_rejected():
 def test_refresh_token_rotation_and_invalidation():
     reg_payload = {
         "email": "refresh@example.com",
-        "password": "RefreshPassword123!"
+        "password": "RefreshPassword123!",
+        "accept_terms": True
     }
     client.post("/api/v1/auth/register", json=reg_payload)
     login_res = client.post("/api/v1/auth/login", json=reg_payload)
@@ -229,7 +278,8 @@ def test_refresh_token_rotation_and_invalidation():
 def test_revoked_refresh_token_rejected():
     reg_payload = {
         "email": "revoked@example.com",
-        "password": "RevokedPassword123!"
+        "password": "RevokedPassword123!",
+        "accept_terms": True
     }
     client.post("/api/v1/auth/register", json=reg_payload)
     login_res = client.post("/api/v1/auth/login", json=reg_payload)
@@ -250,7 +300,8 @@ def test_revoked_refresh_token_rejected():
 def test_logout_revokes_refresh_token():
     reg_payload = {
         "email": "logout@example.com",
-        "password": "LogoutPassword123!"
+        "password": "LogoutPassword123!",
+        "accept_terms": True
     }
     client.post("/api/v1/auth/register", json=reg_payload)
     login_res = client.post("/api/v1/auth/login", json=reg_payload)

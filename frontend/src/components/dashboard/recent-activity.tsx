@@ -1,87 +1,65 @@
 'use client';
 
 import React from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { WorkoutSessionItem } from '@/lib/api';
-import { formatExerciseName, formatDate, formatDuration } from '@/lib/use-dashboard-data';
+import { formatExerciseName, formatShortDate, formatDuration } from '@/lib/use-dashboard-data';
+import { Section } from '@/components/ui/section';
+import { EmptyState } from '@/components/ui/state-panel';
+import { ScoreValue } from '@/components/ui/score';
 
 interface RecentActivityProps {
   sessions: WorkoutSessionItem[];
 }
 
 export function RecentActivity({ sessions }: RecentActivityProps) {
-  const router = useRouter();
-
   if (!sessions || sessions.length === 0) {
     return (
-      <div className="p-6 bg-zinc-900 border border-zinc-800 rounded-xl space-y-3">
-        <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-          Recent Activity
-        </h3>
-        <div className="flex items-center justify-center min-h-[100px] text-center text-xs text-zinc-500 border border-dashed border-zinc-800 rounded-lg">
-          No workout history yet.
-        </div>
-      </div>
+      <Section title="Recent sessions">
+        <EmptyState title="No sessions recorded" description="Finished workouts are listed here, newest first." />
+      </Section>
     );
   }
 
   return (
-    <div className="p-6 bg-zinc-900 border border-zinc-800 rounded-xl space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-          Recent Activity
-        </h3>
-        <Link href="/history" className="text-xs text-lime-400 hover:text-lime-300 font-semibold transition-colors">
-          View All →
+    <Section
+      title="Recent sessions"
+      meta={
+        <Link href="/history" className="font-medium text-brand underline-offset-4 hover:text-brand-hover hover:underline">
+          View all
         </Link>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-xs">
+      }
+    >
+      <div className="-mx-1 overflow-x-auto px-1">
+        <table className="w-full text-left text-sm">
           <thead>
-            <tr className="border-b border-zinc-800 text-zinc-400 font-medium uppercase tracking-wider">
-              <th className="pb-3 pr-4">Exercise</th>
-              <th className="pb-3 px-4">Date & Time</th>
-              <th className="pb-3 px-4 text-right">Reps</th>
-              <th className="pb-3 px-4 text-right">Form Score</th>
-              <th className="pb-3 pl-4 text-right">Duration</th>
+            <tr className="border-b border-rule text-ink-2">
+              <th scope="col" className="pb-2 pr-4 font-normal">Exercise</th>
+              <th scope="col" className="px-4 pb-2 font-normal">Date</th>
+              <th scope="col" className="px-4 pb-2 text-right font-normal">Reps</th>
+              <th scope="col" className="px-4 pb-2 text-right font-normal">Form score</th>
+              <th scope="col" className="hidden pb-2 pl-4 text-right font-normal sm:table-cell">Duration</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-800/60">
-            {sessions.map((s) => {
-              const exName = formatExerciseName(s.exercise);
-              const dateStr = formatDate(s.ended_at || s.started_at);
-              const durStr = formatDuration(s.duration_seconds || 0);
-
-              let scoreColor = 'text-zinc-400';
-              if (s.average_form_score !== null && s.average_form_score !== undefined) {
-                if (s.average_form_score >= 85) scoreColor = 'text-lime-400 font-medium';
-                else if (s.average_form_score >= 70) scoreColor = 'text-amber-400 font-medium';
-                else scoreColor = 'text-rose-400 font-medium';
-              }
-
-              return (
-                <tr
-                  key={s.id}
-                  onClick={() => router.push(`/history/${s.id}`)}
-                  className="hover:bg-zinc-800/40 transition-colors cursor-pointer"
-                >
-                  <td className="py-3 pr-4 font-semibold text-zinc-100">{exName}</td>
-                  <td className="py-3 px-4 text-zinc-400 whitespace-nowrap">{dateStr}</td>
-                  <td className="py-3 px-4 text-right font-mono text-zinc-200">{s.total_reps}</td>
-                  <td className={`py-3 px-4 text-right font-mono ${scoreColor}`}>
-                    {s.average_form_score !== null && s.average_form_score !== undefined
-                      ? `${s.average_form_score}%`
-                      : 'N/A'}
-                  </td>
-                  <td className="py-3 pl-4 text-right text-zinc-400 whitespace-nowrap">{durStr}</td>
-                </tr>
-              );
-            })}
+          <tbody className="divide-y divide-rule">
+            {sessions.map((s) => (
+              <tr key={s.id} className="transition-colors hover:bg-sunken">
+                <td className="py-3 pr-4 font-medium">
+                  <Link href={`/history/${s.id}`} className="underline-offset-4 hover:text-brand hover:underline">
+                    {formatExerciseName(s.exercise)}
+                  </Link>
+                </td>
+                <td className="whitespace-nowrap px-4 py-3 text-ink-2">{formatShortDate(s.ended_at || s.started_at)}</td>
+                <td className="px-4 py-3 text-right tabular-nums">{s.total_reps}</td>
+                <td className="px-4 py-3 text-right">
+                  <ScoreValue score={s.average_form_score} />
+                </td>
+                <td className="hidden whitespace-nowrap py-3 pl-4 text-right text-ink-2 sm:table-cell">{formatDuration(s.duration_seconds || 0)}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
-    </div>
+    </Section>
   );
 }

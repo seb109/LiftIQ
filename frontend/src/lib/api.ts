@@ -14,6 +14,8 @@ export interface RegisterRequest {
   name: string;
   email: string;
   password: string;
+  /** Must be true; the server rejects registration otherwise and records the acceptance time. */
+  accept_terms: boolean;
 }
 
 export interface LoginRequest {
@@ -34,6 +36,21 @@ export interface APIResponse<T = any> {
   message: string;
   data?: T;
   error?: string;
+}
+
+/**
+ * A human-readable message from a failed API call. FastAPI returns `detail` as a string
+ * for HTTPException but as a list of {msg} objects for validation errors (422).
+ */
+export function apiErrorMessage(err: unknown, fallback: string): string {
+  const e = err as { response?: { data?: { detail?: unknown; message?: string } }; message?: string };
+  const detail = e?.response?.data?.detail;
+  if (typeof detail === 'string' && detail) return detail;
+  if (Array.isArray(detail)) {
+    const msg = (detail[0] as { msg?: unknown } | undefined)?.msg;
+    if (typeof msg === 'string' && msg) return msg.replace(/^Value error,\s*/i, '');
+  }
+  return e?.response?.data?.message || e?.message || fallback;
 }
 
 // Token Storage Helpers (SSR Safe)

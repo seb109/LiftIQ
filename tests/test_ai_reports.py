@@ -58,7 +58,7 @@ def setup_db():
 
 
 def register_and_get_token(email: str, name: str = "Test User") -> dict:
-    reg_payload = {"name": name, "email": email, "password": "TestPassword123!"}
+    reg_payload = {"name": name, "email": email, "password": "TestPassword123!", "accept_terms": True}
     client.post("/api/v1/auth/register", json=reg_payload)
     login_res = client.post("/api/v1/auth/login", json={"email": email, "password": "TestPassword123!"})
     data = login_res.json()["data"]

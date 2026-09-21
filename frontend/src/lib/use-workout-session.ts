@@ -473,8 +473,12 @@ export function useWorkoutSession(): UseWorkoutSessionReturn {
   ) => {
     setStartError(null);
     setCameraErrorReason(null);
+    // A previous workout's numbers must not flash on screen while the new one starts.
+    setStats(null);
+    setElapsedSeconds(0);
+    setCompletionData(null);
     setConnectionState('CONNECTING');
-    console.log('[Workout] starting session — exercise:', exercise);
+    console.log('[Workout] starting session, exercise:', exercise);
 
     // STEP 1: Request camera (before rendering live view so we fail fast)
     const cameraOk = await acquireCamera();

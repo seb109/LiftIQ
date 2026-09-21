@@ -99,12 +99,12 @@ FORM_CHECKS = {
             # Ideal < 20° of lean. Too much lean = quad/back dominance, not glutes.
             "name": "forward_lean",
             "label": "Torso lean",
-            "unit": "°",
+            "unit": " deg",
             "threshold": 20,
             "direction": "below",
             "messages": {
                 "pass": "Chest up ✓",
-                "fail": "Chest up — you're leaning too far forward!"
+                "fail": "Chest up, you're leaning too far forward!"
             }
         },
         {
@@ -114,12 +114,12 @@ FORM_CHECKS = {
             # Ideal < 15°. Safety-critical — knees are at risk here.
             "name": "knee_cave",
             "label": "Knee tracking",
-            "unit": "°",
+            "unit": " deg",
             "threshold": 15,
             "direction": "below",
             "messages": {
                 "pass": "Knees tracking ✓",
-                "fail": "Push knees out — they're caving in!"
+                "fail": "Push knees out, they're caving in!"
             }
         }
     ],
@@ -132,12 +132,12 @@ FORM_CHECKS = {
             # Below 165° = hips sagging — core not engaged.
             "name": "hip_sag",
             "label": "Hip position",
-            "unit": "°",
+            "unit": " deg",
             "threshold": 165,
             "direction": "above",   # value must stay ABOVE 165 (flat plank)
             "messages": {
                 "pass": "Plank solid ✓",
-                "fail": "Squeeze your core — hips are sagging!"
+                "fail": "Squeeze your core, hips are sagging!"
             }
         },
         {
@@ -146,12 +146,12 @@ FORM_CHECKS = {
             # Ideal ~30–50° (45° tuck). Above 65° = elbows winging out wide.
             "name": "elbow_flare",
             "label": "Elbow tuck",
-            "unit": "°",
+            "unit": " deg",
             "threshold": 65,
             "direction": "below",
             "messages": {
                 "pass": "Elbows tucked ✓",
-                "fail": "Tuck your elbows — about 45° from your body!"
+                "fail": "Tuck your elbows, about 45 degrees from your body!"
             }
         }
     ],
@@ -165,12 +165,12 @@ FORM_CHECKS = {
             # Above 15° = elbow is drifting, front delt taking over.
             "name": "elbow_flare",
             "label": "Elbow flare",
-            "unit": "°",
+            "unit": " deg",
             "threshold": 15,
             "direction": "below",
             "messages": {
                 "pass": "Elbow pinned ✓",
-                "fail": "Pin your elbow to your side — don't let it drift!"
+                "fail": "Pin your elbow to your side, don't let it drift!"
             }
         },
         {
@@ -178,12 +178,12 @@ FORM_CHECKS = {
             # Perfectly upright = 0°. Above 10° = swinging the weight up.
             "name": "torso_sway",
             "label": "Torso sway",
-            "unit": "°",
+            "unit": " deg",
             "threshold": 10,
             "direction": "below",
             "messages": {
                 "pass": "Torso still ✓",
-                "fail": "Stop swinging — keep your torso locked!"
+                "fail": "Stop swinging, keep your torso locked!"
             }
         }
     ],
@@ -196,12 +196,12 @@ FORM_CHECKS = {
             # Ideal < 10°. Above 15° = arching too hard.
             "name": "lower_back_arch",
             "label": "Back arch",
-            "unit": "°",
+            "unit": " deg",
             "threshold": 15,
             "direction": "below",
             "messages": {
                 "pass": "Neutral spine ✓",
-                "fail": "Brace your core — you're arching your lower back!"
+                "fail": "Brace your core, you're arching your lower back!"
             }
         },
         {
@@ -210,7 +210,7 @@ FORM_CHECKS = {
             # If the wrist drifts behind (< ~70° to vertical) the joint is loaded badly.
             "name": "wrist_alignment",
             "label": "Wrist stack",
-            "unit": "°",
+            "unit": " deg",
             "threshold": 70,
             "direction": "above",   # wrist-to-vertical angle must stay ABOVE 70°
             "messages": {
@@ -227,12 +227,12 @@ FORM_CHECKS = {
             # Should stay close to 0° (vertical). Above 15° = forward lean.
             "name": "forward_lean",
             "label": "Torso lean",
-            "unit": "°",
+            "unit": " deg",
             "threshold": 15,
             "direction": "below",
             "messages": {
                 "pass": "Chest up ✓",
-                "fail": "Keep your chest up — don't lean forward!"
+                "fail": "Keep your chest up, don't lean forward!"
             }
         },
         {
@@ -242,12 +242,12 @@ FORM_CHECKS = {
             # If the knee caves inward this angle increases relative to vertical.
             "name": "knee_alignment",
             "label": "Knee alignment",
-            "unit": "°",
+            "unit": " deg",
             "threshold": 15,
             "direction": "below",
             "messages": {
                 "pass": "Knee tracking ✓",
-                "fail": "Drive your knee over your toe — it's caving in!"
+                "fail": "Drive your knee over your toe, it's caving in!"
             }
         }
     ],
@@ -262,12 +262,12 @@ FORM_CHECKS = {
             # because deadlifts naturally involve forward lean.
             "name": "back_rounding",
             "label": "Back angle",
-            "unit": "°",
+            "unit": " deg",
             "threshold": 35,
             "direction": "below",
             "messages": {
                 "pass": "Back neutral ✓",
-                "fail": "Keep your back flat — hinge from the hips, not the spine!"
+                "fail": "Keep your back flat, hinge from the hips, not the spine!"
             }
         },
         {
@@ -276,12 +276,12 @@ FORM_CHECKS = {
             # Above 25° from vertical = bar drifting forward, massive lumbar load.
             "name": "bar_drift",
             "label": "Bar path",
-            "unit": "°",
+            "unit": " deg",
             "threshold": 25,
             "direction": "below",
             "messages": {
                 "pass": "Bar close ✓",
-                "fail": "Keep the bar close — drag it up your shins!"
+                "fail": "Keep the bar close, drag it up your shins!"
             }
         }
     ]
@@ -327,15 +327,15 @@ feedback_messages = {
     },
     "bicep_curl": {
         "too_shallow": [
-            "Curl all the way up — squeeze that bicep at the top!",
+            "Curl all the way up, squeeze that bicep at the top!",
             "Don't stop halfway! Full range of motion for max gains."
         ],
         "perfect": [
             "Beautiful curl! Full contraction at the top!",
-            "That's it — squeeze and control the way down!"
+            "That's it, squeeze and control the way down!"
         ],
         "too_deep": [
-            "You don't need to go past 90° — keep the tension on the bicep!",
+            "You don't need to go past 90 degrees, keep the tension on the bicep!",
             "Control it! You're swinging the weight past the peak."
         ],
         "middle": [
@@ -345,43 +345,43 @@ feedback_messages = {
     },
     "shoulder_press": {
         "too_shallow": [
-            "Lock out those arms at the top — full extension!",
+            "Lock out those arms at the top, full extension!",
             "Press all the way up, don't cut the range short!"
         ],
         "perfect": [
             "Full lockout! Great shoulder press!",
-            "Excellent! Arms fully extended — feel those delts!"
+            "Excellent! Arms fully extended, feel those delts!"
         ],
         "too_deep": [
-            "Don't drop the elbows too low — stop at shoulder height!",
-            "Control the descent, elbows at 90° at the bottom is plenty."
+            "Don't drop the elbows too low, stop at shoulder height!",
+            "Control the descent, elbows at 90 degrees at the bottom is plenty."
         ],
         "middle": [
-            "Push those arms all the way up — you've got more!",
-            "Drive through the top — full extension!"
+            "Push those arms all the way up, you've got more!",
+            "Drive through the top, full extension!"
         ]
     },
     "lunge": {
         "too_shallow": [
             "Sink lower! Your back knee should almost touch the floor!",
-            "Deeper lunge — drive that front knee forward over the toe!"
+            "Deeper lunge, drive that front knee forward over the toe!"
         ],
         "perfect": [
             "Perfect lunge depth! Great balance and control!",
-            "That's the depth — feel the stretch in that hip flexor!"
+            "That's the depth, feel the stretch in that hip flexor!"
         ],
         "too_deep": [
-            "Watch the knee — don't let it cave past your toes!",
-            "Ease up slightly — you're losing stability at the bottom."
+            "Watch the knee, don't let it cave past your toes!",
+            "Ease up slightly, you're losing stability at the bottom."
         ],
         "middle": [
-            "Go a little deeper — back knee towards the floor!",
+            "Go a little deeper, back knee towards the floor!",
             "Almost! Step out wider and drop that back knee lower."
         ]
     },
     "deadlift": {
         "too_shallow": [
-            "Hinge deeper — push those hips back further!",
+            "Hinge deeper, push those hips back further!",
             "More hip hinge! The bar should reach knee level."
         ],
         "perfect": [
@@ -389,8 +389,8 @@ feedback_messages = {
             "Perfect pull! Engaged lats and a strong lockout!"
         ],
         "too_deep": [
-            "Don't round that lower back — hinge less, brace more!",
-            "Keep the spine neutral — you're going past safe range."
+            "Don't round that lower back, hinge less, brace more!",
+            "Keep the spine neutral, you're going past safe range."
         ],
         "middle": [
             "Push the hips back further and feel the hamstring stretch!",

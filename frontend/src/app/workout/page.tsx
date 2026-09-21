@@ -2,11 +2,14 @@
 
 import React from 'react';
 import { ProtectedRoute } from '@/components/protected-route';
+import { AppShell } from '@/components/app-shell';
 import { useWorkoutSession } from '@/lib/use-workout-session';
 import { WorkoutSetup } from '@/components/workout/workout-setup';
 import { LiveWorkoutView } from '@/components/workout/live-workout-view';
 import { WorkoutCompleteView } from '@/components/workout/workout-complete-view';
 import { CameraPermissionError } from '@/components/workout/camera-permission-error';
+import { LoadingSpinner } from '@/components/ui/loading-spinner';
+import { InlineAlert } from '@/components/ui/state-panel';
 
 function WorkoutPageContent() {
   const {
@@ -33,23 +36,23 @@ function WorkoutPageContent() {
   // Camera error: permission denied, not found, etc.
   const isCameraError = connectionState === 'ERROR' && !session && cameraErrorReason !== null;
 
-  const handleRetry = () => {
-    clearErrors();
-  };
-
   // ── Completion screen ──────────────────────────────────────────────────────
   if (isDone && completionData) {
-    return <WorkoutCompleteView data={completionData} />;
+    return (
+      <AppShell>
+        <WorkoutCompleteView data={completionData} onNewWorkout={clearErrors} />
+      </AppShell>
+    );
   }
 
   // ── Stopping state ─────────────────────────────────────────────────────────
   if (connectionState === 'STOPPING') {
     return (
-      <div className="min-h-screen bg-[#09090B] flex flex-col items-center justify-center gap-6 p-6">
-        <span className="w-12 h-12 border-2 border-lime-400/30 border-t-lime-400 rounded-full animate-spin" />
-        <div className="text-center space-y-1">
-          <p className="text-lg font-semibold text-white">Finishing your workout…</p>
-          <p className="text-sm text-slate-400">Saving your session and generating your AI report.</p>
+      <div className="stage flex min-h-screen flex-col items-center justify-center gap-6 bg-canvas p-6 text-ink">
+        <LoadingSpinner size="lg" label="Finishing your workout" />
+        <div className="space-y-1 text-center">
+          <p className="text-xl font-semibold">Finishing your workout</p>
+          <p className="text-ink-2">Saving your session and writing your coaching report. This can take a few seconds.</p>
         </div>
       </div>
     );
@@ -57,7 +60,11 @@ function WorkoutPageContent() {
 
   // ── Camera permission / hardware error ─────────────────────────────────────
   if (isCameraError) {
-    return <CameraPermissionError onRetry={handleRetry} errorReason={cameraErrorReason} startError={startError} />;
+    return (
+      <AppShell>
+        <CameraPermissionError onRetry={clearErrors} errorReason={cameraErrorReason} startError={startError} />
+      </AppShell>
+    );
   }
 
   // ── Live workout ───────────────────────────────────────────────────────────
@@ -65,8 +72,10 @@ function WorkoutPageContent() {
     return (
       <>
         {stopError && (
-          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-red-950/90 border border-red-800 rounded-xl px-5 py-3 text-sm text-red-300 shadow-xl">
-            {stopError}
+          <div className="stage fixed inset-x-0 top-0 z-50 p-4">
+            <InlineAlert title="Could not finish the workout" className="mx-auto max-w-xl bg-surface">
+              {stopError}
+            </InlineAlert>
           </div>
         )}
         <LiveWorkoutView
@@ -85,11 +94,9 @@ function WorkoutPageContent() {
 
   // ── Setup screen ───────────────────────────────────────────────────────────
   return (
-    <WorkoutSetup
-      onStart={startSession}
-      isLoading={isStarting}
-      error={isCameraError ? null : startError}
-    />
+    <AppShell>
+      <WorkoutSetup onStart={startSession} isLoading={isStarting} error={isCameraError ? null : startError} />
+    </AppShell>
   );
 }
 

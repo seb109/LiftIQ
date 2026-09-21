@@ -2,6 +2,8 @@
 
 import React from 'react';
 import { ExerciseDistribution } from '@/lib/use-dashboard-data';
+import { Section } from '@/components/ui/section';
+import { EmptyState } from '@/components/ui/state-panel';
 
 interface ExerciseBreakdownProps {
   distribution: ExerciseDistribution[];
@@ -10,46 +12,29 @@ interface ExerciseBreakdownProps {
 export function ExerciseBreakdown({ distribution }: ExerciseBreakdownProps) {
   if (!distribution || distribution.length === 0) {
     return (
-      <div className="p-6 bg-zinc-900 border border-zinc-800 rounded-xl space-y-3">
-        <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-          Exercise Breakdown
-        </h3>
-        <div className="flex flex-col items-center justify-center min-h-[140px] text-center p-4 border border-dashed border-zinc-800 rounded-lg">
-          <p className="text-xs text-zinc-500">No exercise data available yet</p>
-        </div>
-      </div>
+      <Section title="Exercises trained">
+        <EmptyState title="Nothing to show yet" description="Your sessions are grouped by exercise here." />
+      </Section>
     );
   }
 
   return (
-    <div className="p-6 bg-zinc-900 border border-zinc-800 rounded-xl space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-          Exercise Breakdown
-        </h3>
-        <span className="text-xs text-zinc-500 font-mono">
-          {distribution.length} {distribution.length === 1 ? 'type' : 'types'} trained
-        </span>
-      </div>
-
-      <div className="space-y-3">
+    <Section title="Exercises trained" meta={`${distribution.length} ${distribution.length === 1 ? 'type' : 'types'}`}>
+      <ul className="space-y-4">
         {distribution.map((item) => (
-          <div key={item.exercise} className="space-y-1.5">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-medium text-zinc-200">{item.displayName}</span>
-              <span className="text-zinc-400 font-mono">
-                {item.count} {item.count === 1 ? 'session' : 'sessions'} ({item.percentage}%)
+          <li key={item.exercise}>
+            <div className="flex items-baseline justify-between gap-4 text-sm">
+              <span className="font-medium">{item.displayName}</span>
+              <span className="tabular-nums text-ink-2">
+                {item.count} {item.count === 1 ? 'session' : 'sessions'}, {item.percentage}%
               </span>
             </div>
-            <div className="w-full h-2 bg-zinc-950 rounded-full overflow-hidden border border-zinc-800/80">
-              <div
-                className="h-full bg-lime-400 rounded-full transition-all duration-300"
-                style={{ width: `${Math.max(4, item.percentage)}%` }}
-              />
+            <div className="mt-1.5 h-1.5 w-full rounded-control bg-sunken" role="presentation">
+              <div className="h-full min-w-0.5 rounded-control bg-brand" style={{ width: `${item.percentage}%` }} />
             </div>
-          </div>
+          </li>
         ))}
-      </div>
-    </div>
+      </ul>
+    </Section>
   );
 }

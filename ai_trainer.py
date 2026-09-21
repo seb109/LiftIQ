@@ -26,6 +26,7 @@ Rep durations (seconds): {[round(t,1) for t in session["current_set_rep_times"]]
 
 Look for depth consistency, pace changes, and whether they hit target reps.
 Give specific actionable feedback like a real trainer would.
+Write plain sentences. Do not use em dashes or emoji.
 """
     try:
         response = await client.chat.completions.create(
@@ -74,6 +75,7 @@ Analyze:
 
 Format your response naturally like a trainer talking to their client.
 Start with the score like: "Performance Score: X/10"
+Write plain sentences. Do not use em dashes or emoji.
 """
     try:
         response = await client.chat.completions.create(

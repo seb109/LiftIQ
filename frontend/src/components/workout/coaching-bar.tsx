@@ -2,8 +2,9 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { WorkoutStats } from '@/lib/api';
+import { FailGlyph } from '@/components/ui/icons';
 
-const NEUTRAL_MESSAGE = 'Good form — keep going.';
+const NEUTRAL_MESSAGE = 'Good form. Keep going.';
 /** Minimum ms a correction must persist before updating the display (debounce). */
 const CORRECTION_DEBOUNCE_MS = 1200;
 
@@ -11,6 +12,7 @@ interface CoachingBarProps {
   stats: WorkoutStats | null;
 }
 
+/** The current cue, large enough to read mid-set. A correction gets a glyph and a tinted strip. */
 export function CoachingBar({ stats }: CoachingBarProps) {
   const [displayed, setDisplayed] = useState<string>(NEUTRAL_MESSAGE);
   const [isViolation, setIsViolation] = useState(false);
@@ -30,7 +32,7 @@ export function CoachingBar({ stats }: CoachingBarProps) {
 
     // Debounce to avoid flickering. `stats` is a new object on every poll (~800 ms),
     // shorter than the debounce window, so the pending timer must NOT be cancelled by
-    // this effect's cleanup — that made every change get cleared before it could fire
+    // this effect's cleanup: that made every change get cleared before it could fire
     // and the bar never left its initial message. Only cancel when the message
     // reverts to what is already displayed; leave an already-pending change alone.
     if (newMessage === lastViolationRef.current) {
@@ -59,22 +61,12 @@ export function CoachingBar({ stats }: CoachingBarProps) {
   return (
     <div
       id="coaching-bar"
-      className={[
-        'px-5 py-3.5 rounded-xl border flex items-center gap-3 transition-colors duration-500',
-        isViolation
-          ? 'bg-red-950/40 border-red-800/50'
-          : 'bg-zinc-900/60 border-zinc-800/60',
-      ].join(' ')}
+      className={`flex min-h-14 items-center gap-3 rounded-surface border px-4 py-3 transition-colors ${
+        isViolation ? 'border-fail bg-fail-tint' : 'border-rule bg-transparent'
+      }`}
     >
-      <span className={`text-lg shrink-0 ${isViolation ? 'text-red-400' : 'text-lime-400'}`}>
-        {isViolation ? '⚠' : '✓'}
-      </span>
-      <p
-        id="coaching-text"
-        className={`text-sm font-medium transition-colors duration-300 ${
-          isViolation ? 'text-red-300' : 'text-slate-300'
-        }`}
-      >
+      {isViolation && <FailGlyph className="size-6 shrink-0 text-fail" />}
+      <p id="coaching-text" aria-live="polite" className="text-xl font-medium">
         {displayed}
       </p>
     </div>

@@ -4,11 +4,23 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
-import { Logo } from '@/components/ui/logo';
+import { AuthLayout, AuthFormSkeleton } from '@/components/auth-layout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
-import { Mail, Lock, User, AlertCircle, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { InlineAlert } from '@/components/ui/state-panel';
+
+interface FieldErrors {
+  name?: string;
+  email?: string;
+  password?: string;
+  confirmPassword?: string;
+  terms?: string;
+}
+
+function joinList(items: string[]): string {
+  if (items.length <= 1) return items.join('');
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
 
 export default function RegisterPage() {
   const { register, status, error: globalError, clearError } = useAuth();
@@ -18,13 +30,9 @@ export default function RegisterPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [acceptTerms, setAcceptTerms] = useState(false);
 
-  const [fieldErrors, setFieldErrors] = useState<{
-    name?: string;
-    email?: string;
-    password?: string;
-    confirmPassword?: string;
-  }>({});
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [isLoading, setIsLoading] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -34,37 +42,46 @@ export default function RegisterPage() {
     }
   }, [status, router]);
 
-  // Password rules validation helper
-  const hasMinLength = password.length >= 8;
-  const hasUpper = /[A-Z]/.test(password);
-  const hasLower = /[a-z]/.test(password);
-  const hasNumber = /[0-9]/.test(password);
-  const hasSpecial = /[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(password);
-  const isPasswordValid = hasMinLength && hasUpper && hasLower && hasNumber && hasSpecial;
+  // What the password still needs, stated as one sentence rather than a checklist.
+  const missing: string[] = [];
+  if (password.length < 8) missing.push('at least 8 characters');
+  if (!/[A-Z]/.test(password)) missing.push('an uppercase letter');
+  if (!/[a-z]/.test(password)) missing.push('a lowercase letter');
+  if (!/[0-9]/.test(password)) missing.push('a number');
+  if (!/[!@#$%^&*()_+\-=[\]{}|;:,.<>?]/.test(password)) missing.push('a special character');
+  const isPasswordValid = missing.length === 0;
+
+  const passwordHelp = !password
+    ? 'At least 8 characters, with an uppercase letter, a lowercase letter, a number and a special character.'
+    : isPasswordValid
+      ? 'Meets all requirements.'
+      : `Still needed: ${joinList(missing)}.`;
 
   const validate = (): boolean => {
-    const errors: typeof fieldErrors = {};
+    const errors: FieldErrors = {};
 
-    if (!name.trim()) {
-      errors.name = 'Full name is required';
-    }
+    if (!name.trim()) errors.name = 'Enter your name.';
 
     if (!email) {
-      errors.email = 'Email address is required';
+      errors.email = 'Enter your email address.';
     } else if (!/\S+@\S+\.\S+/.test(email)) {
-      errors.email = 'Please enter a valid email address';
+      errors.email = 'Enter a valid email address.';
     }
 
     if (!password) {
-      errors.password = 'Password is required';
+      errors.password = 'Choose a password.';
     } else if (!isPasswordValid) {
-      errors.password = 'Password must meet all complexity requirements below';
+      errors.password = `Your password still needs ${joinList(missing)}.`;
     }
 
     if (!confirmPassword) {
-      errors.confirmPassword = 'Please confirm your password';
+      errors.confirmPassword = 'Re-enter your password.';
     } else if (password !== confirmPassword) {
-      errors.confirmPassword = 'Passwords do not match';
+      errors.confirmPassword = 'The passwords do not match.';
+    }
+
+    if (!acceptTerms) {
+      errors.terms = 'Accept the Terms of Service and Privacy Policy to create an account.';
     }
 
     setFieldErrors(errors);
@@ -80,10 +97,10 @@ export default function RegisterPage() {
 
     setIsLoading(true);
     try {
-      await register({ name, email, password });
+      await register({ name, email, password, accept_terms: true });
       router.replace('/');
-    } catch (err: any) {
-      setSubmitError(err.message || 'Registration failed. Please try again.');
+    } catch (err: unknown) {
+      setSubmitError(err instanceof Error && err.message ? err.message : 'Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -91,142 +108,113 @@ export default function RegisterPage() {
 
   if (status === 'loading') {
     return (
-      <div className="min-h-screen bg-[#09090B] flex items-center justify-center p-4">
-        <div className="animate-pulse flex flex-col items-center gap-4">
-          <Logo size="lg" />
-        </div>
-      </div>
+      <AuthLayout>
+        <AuthFormSkeleton />
+      </AuthLayout>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-[#09090B] flex flex-col items-center justify-center p-4 sm:p-6 lg:p-8 relative">
-      {/* Background ambient lighting */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-lime-500/5 rounded-full blur-3xl pointer-events-none" />
+  const formError = submitError || globalError;
 
-      <div className="w-full max-w-md relative z-10 my-8">
-        <div className="flex flex-col items-center text-center mb-6">
-          <Logo size="lg" showSubtitle />
+  return (
+    <AuthLayout>
+      <h1 className="text-2xl font-semibold tracking-tight">Create your account</h1>
+
+      {formError && <InlineAlert title="Could not create your account" className="mt-6">{formError}</InlineAlert>}
+
+      <form onSubmit={handleSubmit} noValidate className="mt-6 flex flex-col gap-5">
+        <Input
+          label="Full name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          error={fieldErrors.name}
+          autoComplete="name"
+          disabled={isLoading}
+        />
+
+        <Input
+          label="Email"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          error={fieldErrors.email}
+          autoComplete="email"
+          disabled={isLoading}
+        />
+
+        <Input
+          label="Password"
+          isPassword
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          error={fieldErrors.password}
+          helperText={passwordHelp}
+          autoComplete="new-password"
+          disabled={isLoading}
+        />
+
+        <Input
+          label="Confirm password"
+          isPassword
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          error={fieldErrors.confirmPassword}
+          autoComplete="new-password"
+          disabled={isLoading}
+        />
+
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-start gap-3">
+            <input
+              id="accept-terms"
+              type="checkbox"
+              checked={acceptTerms}
+              onChange={(e) => setAcceptTerms(e.target.checked)}
+              disabled={isLoading}
+              aria-invalid={fieldErrors.terms ? true : undefined}
+              aria-describedby={fieldErrors.terms ? 'accept-terms-message' : undefined}
+              className="mt-0.5 size-5 shrink-0 rounded-control border border-rule-strong accent-[var(--brand)]"
+            />
+            <label htmlFor="accept-terms" className="text-sm text-ink">
+              I have read and agree to the{' '}
+              <Link
+                href="/terms"
+                target="_blank"
+                rel="noopener"
+                className="font-medium text-brand underline underline-offset-4 hover:text-brand-hover"
+              >
+                Terms of Service
+              </Link>{' '}
+              and the{' '}
+              <Link
+                href="/privacy"
+                target="_blank"
+                rel="noopener"
+                className="font-medium text-brand underline underline-offset-4 hover:text-brand-hover"
+              >
+                Privacy Policy
+              </Link>
+              .
+            </label>
+          </div>
+          {fieldErrors.terms && (
+            <p id="accept-terms-message" className="text-sm text-fail">
+              {fieldErrors.terms}
+            </p>
+          )}
         </div>
 
-        <Card variant="elevated" className="border-zinc-800 bg-zinc-900/90 backdrop-blur-xl">
-          <CardHeader className="text-center pb-2">
-            <CardTitle className="text-2xl font-bold">Create Your Account</CardTitle>
-            <CardDescription>
-              Join LiftIQ to track, analyze, and perfect your lifts with real-time AI.
-            </CardDescription>
-          </CardHeader>
+        <Button type="submit" size="lg" isLoading={isLoading} className="mt-1 w-full">
+          Create account
+        </Button>
+      </form>
 
-          <CardContent className="pt-4">
-            {(submitError || globalError) && (
-              <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-start gap-3">
-                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <p className="font-semibold">Registration Error</p>
-                  <p className="text-xs text-red-400/90 mt-0.5">{submitError || globalError}</p>
-                </div>
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-              <Input
-                label="Full Name"
-                type="text"
-                placeholder="Alex Mercer"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                error={fieldErrors.name}
-                leftIcon={<User className="w-4 h-4" />}
-                autoComplete="name"
-                disabled={isLoading}
-              />
-
-              <Input
-                label="Email Address"
-                type="email"
-                placeholder="athlete@liftiq.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                error={fieldErrors.email}
-                leftIcon={<Mail className="w-4 h-4" />}
-                autoComplete="email"
-                disabled={isLoading}
-              />
-
-              <Input
-                label="Password"
-                isPassword
-                placeholder="••••••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                error={fieldErrors.password}
-                leftIcon={<Lock className="w-4 h-4" />}
-                autoComplete="new-password"
-                disabled={isLoading}
-              />
-
-              {/* Password Strength Requirements */}
-              <div className="bg-zinc-950/60 rounded-xl p-3 border border-zinc-800/80 text-xs flex flex-col gap-1.5">
-                <span className="text-slate-400 font-medium mb-0.5">Password requirements:</span>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <div className={`flex items-center gap-1.5 ${hasMinLength ? 'text-lime-400' : 'text-slate-500'}`}>
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>8+ characters</span>
-                  </div>
-                  <div className={`flex items-center gap-1.5 ${hasUpper ? 'text-lime-400' : 'text-slate-500'}`}>
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Uppercase letter</span>
-                  </div>
-                  <div className={`flex items-center gap-1.5 ${hasLower ? 'text-lime-400' : 'text-slate-500'}`}>
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Lowercase letter</span>
-                  </div>
-                  <div className={`flex items-center gap-1.5 ${hasNumber ? 'text-lime-400' : 'text-slate-500'}`}>
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Number</span>
-                  </div>
-                  <div className={`flex items-center gap-1.5 ${hasSpecial ? 'text-lime-400' : 'text-slate-500'}`}>
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Special character</span>
-                  </div>
-                </div>
-              </div>
-
-              <Input
-                label="Confirm Password"
-                isPassword
-                placeholder="••••••••••••"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                error={fieldErrors.confirmPassword}
-                leftIcon={<Lock className="w-4 h-4" />}
-                autoComplete="new-password"
-                disabled={isLoading}
-              />
-
-              <Button
-                type="submit"
-                variant="primary"
-                size="lg"
-                isLoading={isLoading}
-                rightIcon={<ArrowRight className="w-4 h-4" />}
-                className="w-full mt-2 font-bold"
-              >
-                Create Account
-              </Button>
-            </form>
-          </CardContent>
-
-          <CardFooter className="flex flex-col items-center justify-center border-t border-zinc-800/80 pt-6 mt-2">
-            <p className="text-sm text-slate-400">
-              Already have an account?{' '}
-              <Link href="/login" className="text-lime-400 hover:text-lime-300 font-semibold transition-colors underline-offset-4 hover:underline">
-                Sign in
-              </Link>
-            </p>
-          </CardFooter>
-        </Card>
-      </div>
-    </div>
+      <p className="mt-6 text-sm text-ink-2">
+        Already have an account?{' '}
+        <Link href="/login" className="font-medium text-brand underline underline-offset-4 hover:text-brand-hover">
+          Sign in
+        </Link>
+      </p>
+    </AuthLayout>
   );
 }

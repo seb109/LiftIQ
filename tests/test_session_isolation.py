@@ -37,7 +37,7 @@ def override_get_db():
 
 
 def register_and_get_headers(client: TestClient, email: str) -> dict:
-    payload = {"name": "Isolation Tester", "email": email, "password": "TestPassword123!"}
+    payload = {"name": "Isolation Tester", "email": email, "password": "TestPassword123!", "accept_terms": True}
     client.post("/api/v1/auth/register", json=payload)
     login_res = client.post("/api/v1/auth/login", json={"email": email, "password": "TestPassword123!"})
     token = login_res.json()["data"]["access_token"]

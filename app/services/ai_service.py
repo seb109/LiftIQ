@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -13,6 +14,24 @@ from app.repositories.ai_report_repository import AIReportRepository
 from app.schemas.report import AIReportStructuredSchema
 
 logger = logging.getLogger(__name__)
+
+_EM_DASH = re.compile(r"\s*\u2014\s*")
+
+
+def _plain(text: str) -> str:
+    """The prompt asks the model not to use em dashes; this guarantees it for what reaches the UI."""
+    return _EM_DASH.sub(", ", text)
+
+
+def _plain_report(report: "AIReportStructuredSchema") -> "AIReportStructuredSchema":
+    return report.model_copy(update={
+        "strengths": [_plain(s) for s in report.strengths],
+        "mistakes": [_plain(s) for s in report.mistakes],
+        "improvements": [_plain(s) for s in report.improvements],
+        "coach_summary": _plain(report.coach_summary),
+        "next_session_focus": _plain(report.next_session_focus),
+        "motivation": _plain(report.motivation),
+    })
 
 MODEL_NAME = "llama-3.1-8b-instant"
 
@@ -85,22 +104,22 @@ def format_report_markdown(exercise: str, structured: AIReportStructuredSchema) 
 
 **Overall Score:** {structured.overall_score:.0f}/100 | **Form Score:** {structured.form_score:.0f}/100
 
-## 🎯 Coach Summary
+## Coach Summary
 {structured.coach_summary}
 
-## 💪 Strengths
+## Strengths
 {strengths_md}
 
-## ⚠️ Areas for Improvement
+## Areas for Improvement
 {mistakes_md}
 
-## 💡 Recommendations
+## Recommendations
 {improvements_md}
 
-## 📌 Next Session Focus
+## Next Session Focus
 {structured.next_session_focus}
 
-## 🔥 Motivation
+## Motivation
 {structured.motivation}
 """
 
@@ -123,7 +142,8 @@ async def generate_structured_ai_report(workout_data: Dict[str, Any]) -> AIRepor
         "Requirements:\n"
         "- Base feedback ONLY on provided workout metrics.\n"
         "- Do NOT diagnose injuries or make medical claims.\n"
-        "- Keep coaching actionable, specific, and encouraging."
+        "- Keep coaching actionable, specific, and encouraging.\n"
+        "- Write plain sentences. Do not use em dashes or emoji."
     )
 
     user_prompt = f"Workout Data:\n{json.dumps(workout_data, indent=2)}"
@@ -146,7 +166,7 @@ async def generate_structured_ai_report(workout_data: Dict[str, Any]) -> AIRepor
             temperature=0.3
         )
         content = completion.choices[0].message.content
-        return AIReportStructuredSchema.model_validate_json(content)
+        return _plain_report(AIReportStructuredSchema.model_validate_json(content))
     except Exception as err1:
         logger.warning("Groq AI generation Attempt 1 failed/invalid. Retrying once: %s", type(err1).__name__)
 
@@ -167,7 +187,7 @@ async def generate_structured_ai_report(workout_data: Dict[str, Any]) -> AIRepor
             temperature=0.2
         )
         content2 = completion2.choices[0].message.content
-        return AIReportStructuredSchema.model_validate_json(content2)
+        return _plain_report(AIReportStructuredSchema.model_validate_json(content2))
     except Exception as err2:
         logger.warning("Groq AI generation Attempt 2 failed/invalid (%s). Using safe fallback.", type(err2).__name__)
 

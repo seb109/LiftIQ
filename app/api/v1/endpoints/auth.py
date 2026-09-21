@@ -47,7 +47,8 @@ def register(req: UserRegisterRequest, db: Session = Depends(get_db)):
         email=normalized_email,
         password_hash=hashed_pw,
         is_active=True,
-        is_verified=False
+        is_verified=False,
+        terms_accepted_at=datetime.now(timezone.utc),
     )
     created_user = user_repo.create(user)
 

@@ -37,6 +37,11 @@ class User(Base):
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # When the user accepted the Terms of Service and Privacy Policy at signup.
+    # NULL for accounts created before acceptance was recorded.
+    terms_accepted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Relationships
     workout_sessions: Mapped[List["WorkoutSession"]] = relationship(

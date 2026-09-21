@@ -8,6 +8,9 @@ import { ConnectionStatus } from './connection-status';
 import { StatsPanel } from './stats-panel';
 import { CoachingBar } from './coaching-bar';
 import { EndWorkoutDialog } from './end-workout-dialog';
+import { Button } from '@/components/ui/button';
+import { LoadingSpinner } from '@/components/ui/loading-spinner';
+import { ScoreValue } from '@/components/ui/score';
 import { markLiveViewRender } from '@/lib/workout-perf';
 
 function formatExercise(ex: string): string {
@@ -26,6 +29,10 @@ interface LiveWorkoutViewProps {
   onTogglePause: () => void;
 }
 
+/**
+ * The workout stage. Rendered on the dark `stage` surface: the camera feed is the
+ * content, and the counters are sized to be read from a few metres away.
+ */
 export function LiveWorkoutView({
   session,
   stats,
@@ -55,7 +62,7 @@ export function LiveWorkoutView({
     video.srcObject = stream;
 
     // autoPlay may not trigger in all browsers without an explicit .play() call,
-    // but .play() returns a promise — we must handle the rejection gracefully.
+    // but .play() returns a promise, so its rejection must be handled.
     video.play().then(() => {
       console.log('[Workout] video.play() succeeded');
     }).catch((err) => {
@@ -75,7 +82,7 @@ export function LiveWorkoutView({
   const handleLoadedMetadata = () => {
     const video = videoRef.current;
     if (video) {
-      console.log('[Workout] video metadata loaded — dimensions:', video.videoWidth, 'x', video.videoHeight);
+      console.log('[Workout] video metadata loaded, dimensions:', video.videoWidth, 'x', video.videoHeight);
     }
   };
 
@@ -84,8 +91,11 @@ export function LiveWorkoutView({
     await onEnd();
   };
 
+  const isConnecting =
+    connectionState === 'CONNECTING' || connectionState === 'RECONNECTING' || connectionState === 'READY';
+
   return (
-    <>
+    <div className="stage flex min-h-screen flex-col bg-canvas text-ink">
       <EndWorkoutDialog
         isOpen={showEndDialog}
         isStopping={isStopping}
@@ -93,129 +103,107 @@ export function LiveWorkoutView({
         onCancel={() => setShowEndDialog(false)}
       />
 
-      <div className="min-h-screen bg-[#09090B] flex flex-col">
-        {/* ── Top bar ──────────────────────────────────────────────────────── */}
-        <header className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-zinc-800/60 bg-zinc-950/80 backdrop-blur-md sticky top-0 z-30">
-          <div className="flex items-center gap-3">
-            <div className="w-2 h-2 rounded-full bg-lime-400 animate-pulse" />
-            <span className="text-sm font-semibold text-slate-200">
-              {formatExercise(session.exercise)}
-            </span>
-          </div>
-          <ConnectionStatus state={connectionState} />
-        </header>
+      <header className="flex items-center justify-between border-b border-rule px-4 py-3 sm:px-6">
+        <h1 className="text-base font-semibold">{formatExercise(session.exercise)}</h1>
+        <ConnectionStatus state={connectionState} />
+      </header>
 
-        {/* ── Main content ─────────────────────────────────────────────────── */}
-        <div className="flex-1 flex flex-col lg:flex-row gap-0 overflow-hidden">
+      <div className="flex flex-1 flex-col lg:flex-row">
+        {/* Camera. The raw video and the annotated canvas fill the same box and share
+            object-contain, so the overlay lines up with the picture on any screen shape. */}
+        <div className="relative min-h-[50vh] flex-1 overflow-hidden bg-sunken lg:min-h-0">
+          {/*
+            Live camera preview, always in the DOM so the user sees themselves and so
+            videoWidth/videoHeight are available for frame capture (it must not be hidden).
+            The annotated canvas is drawn on top once frames return from the backend.
+          */}
+          <video
+            ref={videoRef}
+            id="workout-video"
+            autoPlay
+            muted
+            playsInline
+            onLoadedMetadata={handleLoadedMetadata}
+            className="absolute inset-0 h-full w-full object-contain"
+            aria-label="Live camera preview"
+          />
 
-          {/* Camera area (hero) */}
-          <div className="relative flex-1 bg-zinc-950 flex items-center justify-center overflow-hidden min-h-[300px]">
+          <canvas
+            ref={annotatedCanvasRef}
+            id="annotated-canvas"
+            className="absolute inset-0 h-full w-full object-contain"
+            aria-label="Live pose detection overlay"
+          />
 
-            {/*
-              Live camera preview — always visible so the user sees themselves.
-              The annotated canvas is drawn on top via absolute positioning once frames arrive.
-              video is NOT hidden: stream.videoWidth/Height must be > 0 for frame capture.
-            */}
-            <video
-              ref={videoRef}
-              id="workout-video"
-              autoPlay
-              muted
-              playsInline
-              onLoadedMetadata={handleLoadedMetadata}
-              className="w-full h-full object-cover max-h-[calc(100vh-120px)]"
-              aria-label="Live camera preview"
-            />
-
-            {/*
-              Annotated canvas — drawn on top of raw video feed once frames return from backend.
-              Starts transparent; fills in as annotated JPEG frames arrive.
-            */}
-            <canvas
-              ref={annotatedCanvasRef}
-              id="annotated-canvas"
-              className="absolute inset-0 w-full h-full object-contain"
-              aria-label="Live pose detection overlay"
-            />
-
-            {/* Connecting overlay (before WS is open) */}
-            {(connectionState === 'CONNECTING' || connectionState === 'RECONNECTING' || connectionState === 'READY') && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950/60 gap-4">
-                <span className="w-10 h-10 border-2 border-lime-400/30 border-t-lime-400 rounded-full animate-spin" />
-                <p className="text-sm text-slate-300 font-medium">
-                  {connectionState === 'RECONNECTING' ? 'Reconnecting…' : 'Starting camera…'}
-                </p>
-              </div>
-            )}
-
-            {/* Paused overlay */}
-            {isPaused && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950/60">
-                <p className="text-2xl font-bold text-white">Paused</p>
-                <p className="text-sm text-slate-400 mt-1">Press Resume to continue</p>
-              </div>
-            )}
-
-            {/* Mobile quick-stats overlay */}
-            <div className="absolute bottom-3 left-3 lg:hidden flex items-center gap-2 z-10">
-              <div className="bg-zinc-950/80 border border-zinc-800/80 rounded-lg px-3 py-1.5 text-center backdrop-blur-sm">
-                <span id="mobile-rep-count" className="text-xl font-extrabold text-white tabular-nums">{stats?.counter ?? 0}</span>
-                <span className="text-xs text-slate-400 ml-1">reps</span>
-              </div>
-              {stats?.form_score !== null && stats?.form_score !== undefined && (
-                <div className="bg-zinc-950/80 border border-zinc-800/80 rounded-lg px-3 py-1.5 backdrop-blur-sm">
-                  <span className="text-xl font-bold text-lime-400 tabular-nums">{Math.round(stats.form_score)}</span>
-                  <span className="text-xs text-slate-400 ml-1">form</span>
-                </div>
-              )}
+          {isConnecting && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-overlay">
+              <LoadingSpinner size="lg" label="Connecting" />
+              <p className="text-lg font-medium">
+                {connectionState === 'RECONNECTING' ? 'Reconnecting' : 'Starting camera'}
+              </p>
             </div>
-          </div>
+          )}
 
-          {/* Desktop stats sidebar */}
-          <div className="hidden lg:flex flex-col w-56 xl:w-64 border-l border-zinc-800/60 bg-zinc-950/60 p-4 gap-4 overflow-y-auto">
-            <StatsPanel
-              stats={stats}
-              elapsedSeconds={elapsedSeconds}
-              targetReps={session.targetReps}
-              targetSets={session.targetSets}
-            />
-          </div>
+          {isPaused && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-overlay">
+              <p className="font-display text-3xl">Paused</p>
+              <p className="mt-1 text-ink-2">Select Resume to continue.</p>
+            </div>
+          )}
+
+          {/* Compact figures for narrow screens, where the sidebar is hidden. */}
+          <dl className="absolute bottom-3 left-3 flex items-end gap-5 rounded-surface border border-rule bg-canvas px-4 py-2 lg:hidden">
+            <div>
+              <dt className="text-xs text-ink-2">Reps</dt>
+              <dd id="mobile-rep-count" className="font-display text-3xl tabular-nums leading-none">
+                {stats?.counter ?? 0}
+              </dd>
+            </div>
+            {stats?.form_score !== null && stats?.form_score !== undefined && (
+              <div>
+                <dt className="text-xs text-ink-2">Form</dt>
+                <dd className="text-lg leading-none">
+                  <ScoreValue score={stats.form_score} />
+                </dd>
+              </div>
+            )}
+          </dl>
         </div>
 
-        {/* ── Bottom bar ───────────────────────────────────────────────────── */}
-        <div className="border-t border-zinc-800/60 bg-zinc-950/80 backdrop-blur-md px-4 sm:px-6 py-3 space-y-3">
-          <CoachingBar stats={stats} />
+        <aside className="hidden w-72 shrink-0 overflow-y-auto border-l border-rule p-6 lg:block xl:w-80">
+          <StatsPanel
+            stats={stats}
+            elapsedSeconds={elapsedSeconds}
+            targetReps={session.targetReps}
+            targetSets={session.targetSets}
+          />
+        </aside>
+      </div>
 
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex lg:hidden items-center gap-2 text-xs text-slate-400">
-              <span>Set {stats?.current_set ?? 1}/{session.targetSets}</span>
-              <span className="text-zinc-700">•</span>
-              <span className="font-mono">
-                {String(Math.floor(elapsedSeconds / 60)).padStart(2, '0')}:
-                {String(elapsedSeconds % 60).padStart(2, '0')}
-              </span>
-            </div>
+      <div className="space-y-3 border-t border-rule px-4 py-3 sm:px-6">
+        <CoachingBar stats={stats} />
 
-            <div className="flex gap-2 ml-auto">
-              <button
-                id="pause-workout-btn"
-                onClick={onTogglePause}
-                className="px-4 py-2 rounded-xl border border-zinc-700 text-slate-300 hover:bg-zinc-800 text-sm font-semibold transition-colors"
-              >
-                {isPaused ? 'Resume' : 'Pause'}
-              </button>
-              <button
-                id="end-workout-btn"
-                onClick={() => setShowEndDialog(true)}
-                disabled={isStopping}
-                className="px-4 py-2 rounded-xl bg-red-900/60 hover:bg-red-800/80 border border-red-800/50 text-red-300 text-sm font-bold transition-colors disabled:opacity-50"
-              >
-                End Workout
-              </button>
-            </div>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm text-ink-2 tabular-nums lg:hidden">
+            Set {stats?.current_set ?? 1} of {session.targetSets},{' '}
+            {String(Math.floor(elapsedSeconds / 60)).padStart(2, '0')}:{String(elapsedSeconds % 60).padStart(2, '0')}
+          </p>
+
+          <div className="ml-auto flex gap-2">
+            <Button id="pause-workout-btn" variant="secondary" onClick={onTogglePause}>
+              {isPaused ? 'Resume' : 'Pause'}
+            </Button>
+            <Button
+              id="end-workout-btn"
+              variant="danger"
+              onClick={() => setShowEndDialog(true)}
+              disabled={isStopping}
+            >
+              End workout
+            </Button>
           </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }

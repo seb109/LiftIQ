@@ -4,11 +4,10 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
-import { Logo } from '@/components/ui/logo';
+import { AuthLayout, AuthFormSkeleton } from '@/components/auth-layout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
-import { Mail, Lock, AlertCircle, ArrowRight } from 'lucide-react';
+import { InlineAlert } from '@/components/ui/state-panel';
 
 export default function LoginPage() {
   const { login, status, error: globalError, clearError } = useAuth();
@@ -29,15 +28,13 @@ export default function LoginPage() {
   const validate = (): boolean => {
     const errors: { email?: string; password?: string } = {};
     if (!email) {
-      errors.email = 'Email address is required';
+      errors.email = 'Enter your email address.';
     } else if (!/\S+@\S+\.\S+/.test(email)) {
-      errors.email = 'Please enter a valid email address';
+      errors.email = 'Enter a valid email address.';
     }
-
     if (!password) {
-      errors.password = 'Password is required';
+      errors.password = 'Enter your password.';
     }
-
     setFieldErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -53,8 +50,8 @@ export default function LoginPage() {
     try {
       await login({ email, password });
       router.replace('/');
-    } catch (err: any) {
-      setSubmitError(err.message || 'Failed to sign in. Please check your credentials.');
+    } catch (err: unknown) {
+      setSubmitError(err instanceof Error && err.message ? err.message : 'Check your email and password and try again.');
     } finally {
       setIsLoading(false);
     }
@@ -62,91 +59,52 @@ export default function LoginPage() {
 
   if (status === 'loading') {
     return (
-      <div className="min-h-screen bg-[#09090B] flex items-center justify-center p-4">
-        <div className="animate-pulse flex flex-col items-center gap-4">
-          <Logo size="lg" />
-        </div>
-      </div>
+      <AuthLayout>
+        <AuthFormSkeleton />
+      </AuthLayout>
     );
   }
 
+  const formError = submitError || globalError;
+
   return (
-    <div className="min-h-screen bg-[#09090B] flex flex-col items-center justify-center p-4 sm:p-6 lg:p-8 relative">
-      {/* Background ambient lighting */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-lime-500/5 rounded-full blur-3xl pointer-events-none" />
+    <AuthLayout>
+      <h1 className="text-2xl font-semibold tracking-tight">Sign in</h1>
 
-      <div className="w-full max-w-md relative z-10">
-        <div className="flex flex-col items-center text-center mb-8">
-          <Logo size="lg" showSubtitle />
-        </div>
+      {formError && <InlineAlert title="Could not sign in" className="mt-6">{formError}</InlineAlert>}
 
-        <Card variant="elevated" className="border-zinc-800 bg-zinc-900/90 backdrop-blur-xl">
-          <CardHeader className="text-center pb-2">
-            <CardTitle className="text-2xl font-bold">Welcome Back</CardTitle>
-            <CardDescription>
-              Sign in to access your intelligent workout telemetry and AI reports.
-            </CardDescription>
-          </CardHeader>
+      <form onSubmit={handleSubmit} noValidate className="mt-6 flex flex-col gap-5">
+        <Input
+          label="Email"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          error={fieldErrors.email}
+          autoComplete="email"
+          disabled={isLoading}
+        />
 
-          <CardContent className="pt-4">
-            {(submitError || globalError) && (
-              <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-start gap-3">
-                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <p className="font-semibold">Authentication Error</p>
-                  <p className="text-xs text-red-400/90 mt-0.5">{submitError || globalError}</p>
-                </div>
-              </div>
-            )}
+        <Input
+          label="Password"
+          isPassword
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          error={fieldErrors.password}
+          autoComplete="current-password"
+          disabled={isLoading}
+        />
 
-            <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-              <Input
-                label="Email Address"
-                type="email"
-                placeholder="athlete@liftiq.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                error={fieldErrors.email}
-                leftIcon={<Mail className="w-4 h-4" />}
-                autoComplete="email"
-                disabled={isLoading}
-              />
+        <Button type="submit" size="lg" isLoading={isLoading} className="mt-1 w-full">
+          Sign in
+        </Button>
+      </form>
 
-              <Input
-                label="Password"
-                isPassword
-                placeholder="••••••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                error={fieldErrors.password}
-                leftIcon={<Lock className="w-4 h-4" />}
-                autoComplete="current-password"
-                disabled={isLoading}
-              />
-
-              <Button
-                type="submit"
-                variant="primary"
-                size="lg"
-                isLoading={isLoading}
-                rightIcon={<ArrowRight className="w-4 h-4" />}
-                className="w-full mt-2 font-bold"
-              >
-                Sign In
-              </Button>
-            </form>
-          </CardContent>
-
-          <CardFooter className="flex flex-col items-center justify-center border-t border-zinc-800/80 pt-6 mt-2">
-            <p className="text-sm text-slate-400">
-              Don&apos;t have an account?{' '}
-              <Link href="/register" className="text-lime-400 hover:text-lime-300 font-semibold transition-colors underline-offset-4 hover:underline">
-                Create an account
-              </Link>
-            </p>
-          </CardFooter>
-        </Card>
-      </div>
-    </div>
+      <p className="mt-6 text-sm text-ink-2">
+        New to LiftIQ?{' '}
+        <Link href="/register" className="font-medium text-brand underline underline-offset-4 hover:text-brand-hover">
+          Create an account
+        </Link>
+      </p>
+    </AuthLayout>
   );
 }
