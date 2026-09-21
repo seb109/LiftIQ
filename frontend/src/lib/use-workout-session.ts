@@ -10,6 +10,7 @@ import {
   startWorkoutSession,
   stopWorkoutSession,
 } from './api';
+import { WorkoutPerfMeter, createWorkoutPerfMeter } from './workout-perf';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -19,8 +20,22 @@ export const STATS_POLL_INTERVAL_MS = 800;
 /** JPEG quality for frames sent to backend (0–1). */
 export const FRAME_JPEG_QUALITY = 0.7;
 
-/** Delay between consecutive frame sends in ms (rate-limit to ~10 fps max). */
-const FRAME_INTERVAL_MS = 100;
+/** Minimum gap between consecutive frame sends in ms (rate-limit to ~15 fps max). */
+const FRAME_INTERVAL_MS = 66;
+
+/**
+ * Frames allowed on the wire awaiting their annotated response. 1 would make every
+ * frame pay a full network round trip + server time serially (measured ~2 fps over a
+ * 120 ms RTT link); 2 overlaps upload/download of one frame with server processing of
+ * the other while keeping the server-side queue bounded to a single waiting frame.
+ */
+const MAX_IN_FLIGHT = 2;
+
+/** Frames are downscaled to at most this width before JPEG encoding (the CV engine is validated at ~640 px). */
+const CAPTURE_MAX_WIDTH = 640;
+
+/** If the oldest in-flight frame has had no response for this long, assume it was lost and resume sending. */
+const RESPONSE_TIMEOUT_MS = 4000;
 
 /** WebSocket base URL derived from the API URL env var (ws:// not http://). */
 const WS_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000')
@@ -101,6 +116,19 @@ function cameraErrorMessage(reason: CameraErrorReason): string {
   }
 }
 
+/** Decode a JPEG off the main thread where supported (createImageBitmap), else via <img>. */
+function decodeJpeg(buf: ArrayBuffer): Promise<CanvasImageSource & { width: number; height: number; close?: () => void }> {
+  const blob = new Blob([buf], { type: 'image/jpeg' });
+  if (typeof createImageBitmap === 'function') return createImageBitmap(blob);
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload  = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('frame decode failed')); };
+    img.src = url;
+  });
+}
+
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useWorkoutSession(): UseWorkoutSessionReturn {
@@ -127,11 +155,21 @@ export function useWorkoutSession(): UseWorkoutSessionReturn {
   const frameTimerRef        = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionRef           = useRef<WorkoutSession | null>(null);
   const pausedRef            = useRef(false);
-  const awaitingFrameRef     = useRef(false);
   const stoppingRef          = useRef(false);
   const reconnectTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const frameLoopActiveRef   = useRef(false);
+  // Frame-pipeline bookkeeping (refs only — frames must never cause React renders)
+  const pumpRef              = useRef<() => void>(() => {});
+  const openWsRef            = useRef<(sid: string) => void>(() => {});   // self-reference for reconnects
+  const inFlightRef          = useRef<number[]>([]);   // send timestamps of frames awaiting a response (FIFO)
+  const captureBusyRef       = useRef(false);
+  const lastSendAtRef        = useRef(0);
+  const rxSeqRef             = useRef(0);              // sequence of the latest received response
+  const paintedSeqRef        = useRef(0);              // sequence of the latest painted response
+  const videoElRef           = useRef<HTMLVideoElement | null>(null);
+  const statsInFlightRef     = useRef(false);
+  const perfRef              = useRef<WorkoutPerfMeter | null>(null);
 
   // Keep sessionRef in sync
   useEffect(() => { sessionRef.current = session; }, [session]);
@@ -145,6 +183,7 @@ export function useWorkoutSession(): UseWorkoutSessionReturn {
       streamRef.current = null;
     }
     setStream(null);
+    videoElRef.current = null;
     frameLoopActiveRef.current = false;
     if (frameTimerRef.current !== null) {
       clearTimeout(frameTimerRef.current);
@@ -165,7 +204,13 @@ export function useWorkoutSession(): UseWorkoutSessionReturn {
     }
 
     try {
-      const ms = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      // Ask for VGA-class video (ideal, not exact — never fails with OverconstrainedError).
+      // Unconstrained `video: true` can hand back 720p/1080p on some cameras, which
+      // multiplies capture, upload, decode and annotated-download cost per frame.
+      const ms = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: CAPTURE_MAX_WIDTH }, height: { ideal: 480 }, frameRate: { ideal: 30 } },
+        audio: false,
+      });
       streamRef.current = ms;
       setStream(ms); // triggers LiveWorkoutView's useEffect to attach it
 
@@ -187,67 +232,90 @@ export function useWorkoutSession(): UseWorkoutSessionReturn {
     }
   }, []);
 
-  // ── Frame capture loop (rate-limited, NOT RAF) ────────────────────────────────
+  // ── Frame capture loop (rate-limited setTimeout, NOT RAF) ─────────────────────
+  //
+  // Exactly ONE pending timer exists at any time (schedulePump always clears the
+  // previous one), so loops can never multiply. Up to MAX_IN_FLIGHT frames may be
+  // outstanding; a response frees a slot and re-arms the timer immediately.
 
-  const scheduleNextFrame = useCallback(() => {
+  const schedulePump = useCallback((delayMs: number) => {
     if (!frameLoopActiveRef.current) return;
+    if (frameTimerRef.current !== null) clearTimeout(frameTimerRef.current);
     frameTimerRef.current = setTimeout(() => {
-      sendFrame();
-    }, FRAME_INTERVAL_MS);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+      frameTimerRef.current = null;
+      pumpRef.current();
+    }, Math.max(0, delayMs));
+  }, []);
 
-  const sendFrame = useCallback(() => {
-    if (!frameLoopActiveRef.current) return;
-
-    const ws        = wsRef.current;
+  const captureAndSend = useCallback((ws: WebSocket, videoEl: HTMLVideoElement) => {
     const capCanvas = captureCanvasRef.current;
+    if (!capCanvas) return;
 
-    // Find the live <video> element through the exposed stream tracks
-    // We locate it by querying the document for a video with our stream's id
-    const videoEl = document.getElementById('workout-video') as HTMLVideoElement | null;
-
-    if (
-      !ws ||
-      ws.readyState !== WebSocket.OPEN ||
-      !videoEl ||
-      !capCanvas ||
-      pausedRef.current ||
-      awaitingFrameRef.current
-    ) {
-      scheduleNextFrame();
-      return;
-    }
-
-    // Guard: video must have valid dimensions (stream is playing)
-    if (!videoEl.videoWidth || !videoEl.videoHeight) {
-      scheduleNextFrame();
-      return;
-    }
-
-    capCanvas.width  = videoEl.videoWidth;
-    capCanvas.height = videoEl.videoHeight;
+    // Downscale to CAPTURE_MAX_WIDTH; only touch canvas size when it changes
+    // (assigning width/height reallocates and clears the backing store).
+    const scale = Math.min(1, CAPTURE_MAX_WIDTH / videoEl.videoWidth);
+    const w = Math.round(videoEl.videoWidth * scale);
+    const h = Math.round(videoEl.videoHeight * scale);
+    if (capCanvas.width  !== w) capCanvas.width  = w;
+    if (capCanvas.height !== h) capCanvas.height = h;
     const ctx = capCanvas.getContext('2d');
-    if (!ctx) { scheduleNextFrame(); return; }
+    if (!ctx) return;
 
-    ctx.drawImage(videoEl, 0, 0, capCanvas.width, capCanvas.height);
+    const t0 = performance.now();
+    ctx.drawImage(videoEl, 0, 0, w, h);
+    captureBusyRef.current = true;
     capCanvas.toBlob(
       (blob) => {
-        if (!blob) { scheduleNextFrame(); return; }
-        awaitingFrameRef.current = true;
-        blob.arrayBuffer().then((buf) => {
-          if (wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(buf);
-          } else {
-            awaitingFrameRef.current = false;
-            scheduleNextFrame();
-          }
-        });
+        captureBusyRef.current = false;
+        const sock = wsRef.current;
+        if (!blob || !sock || sock !== ws || sock.readyState !== WebSocket.OPEN || !frameLoopActiveRef.current) return;
+        const now = performance.now();
+        lastSendAtRef.current = now;
+        inFlightRef.current.push(now);
+        perfRef.current?.sent(blob.size, w, h, now - t0);
+        sock.send(blob);
       },
       'image/jpeg',
       FRAME_JPEG_QUALITY,
     );
-    // Note: scheduleNextFrame() is called from onmessage (after ACK) to enforce ping-pong
-  }, [scheduleNextFrame]);
+  }, []);
+
+  const pump = useCallback(() => {
+    if (!frameLoopActiveRef.current) return;
+    const now = performance.now();
+
+    // Watchdog: the server answers every frame, so a response overdue by seconds
+    // means it was lost. Free the window instead of stalling the stream forever.
+    const oldest = inFlightRef.current[0];
+    if (oldest !== undefined && now - oldest > RESPONSE_TIMEOUT_MS) {
+      inFlightRef.current = [];
+      perfRef.current?.stall();
+    }
+
+    const ws = wsRef.current;
+    if (!videoElRef.current || !videoElRef.current.isConnected) {
+      videoElRef.current = document.getElementById('workout-video') as HTMLVideoElement | null;
+    }
+    const videoEl = videoElRef.current;
+
+    if (
+      ws &&
+      ws.readyState === WebSocket.OPEN &&
+      videoEl &&
+      videoEl.videoWidth > 0 &&
+      videoEl.videoHeight > 0 &&
+      !pausedRef.current &&
+      !captureBusyRef.current &&
+      inFlightRef.current.length < MAX_IN_FLIGHT &&
+      now - lastSendAtRef.current >= FRAME_INTERVAL_MS - 2
+    ) {
+      captureAndSend(ws, videoEl);
+    }
+    // Fallback poll; a received response re-arms sooner (see ws.onmessage).
+    schedulePump(FRAME_INTERVAL_MS);
+  }, [captureAndSend, schedulePump]);
+
+  useEffect(() => { pumpRef.current = pump; }, [pump]);
 
   // ── WebSocket ────────────────────────────────────────────────────────────────
 
@@ -266,7 +334,8 @@ export function useWorkoutSession(): UseWorkoutSessionReturn {
     closeWs();
     const accessToken = getStoredAccessToken();
     const url = `${WS_BASE}/ws/webcam?session_id=${sid}&token=${encodeURIComponent(accessToken || '')}`;
-    console.log('[Workout] connecting websocket:', url);
+    // Never log `url`: it carries the access token as a query param.
+    console.log('[Workout] connecting websocket:', `${WS_BASE}/ws/webcam`);
     setConnectionState('CONNECTING');
 
     const ws = new WebSocket(url);
@@ -275,48 +344,59 @@ export function useWorkoutSession(): UseWorkoutSessionReturn {
 
     ws.onopen = () => {
       reconnectAttemptsRef.current = 0;
-      awaitingFrameRef.current     = false;
+      inFlightRef.current          = [];
+      captureBusyRef.current       = false;
       frameLoopActiveRef.current   = true;
       setConnectionState('LIVE');
       console.log('[Workout] websocket opened');
-      scheduleNextFrame();
+      schedulePump(0);
     };
 
     ws.onmessage = (event: MessageEvent<ArrayBuffer>) => {
-      // Received annotated JPEG — unblock next frame
-      awaitingFrameRef.current = false;
-      console.log('[Workout] websocket message: annotated frame', event.data.byteLength, 'bytes');
+      // One response per frame, in order. Free a window slot and re-arm the send timer.
+      const sentAt = inFlightRef.current.shift();
+      const seq = ++rxSeqRef.current;
+      schedulePump(FRAME_INTERVAL_MS - (performance.now() - lastSendAtRef.current));
 
-      const blob = new Blob([event.data], { type: 'image/jpeg' });
-      const url  = URL.createObjectURL(blob);
+      const buf = event.data;
+      if (buf.byteLength === 0) return; // server skipped this frame — nothing to draw
+
       const canvas = annotatedCanvasRef.current;
-      if (!canvas) { URL.revokeObjectURL(url); scheduleNextFrame(); return; }
+      if (!canvas) return;
 
-      const img = new Image();
-      img.onload = () => {
+      const decodeStart = performance.now();
+      decodeJpeg(buf).then((img) => {
+        // Decodes can finish out of order; never paint an older frame over a newer one.
+        if (seq < paintedSeqRef.current) { img.close?.(); return; }
+        paintedSeqRef.current = seq;
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          canvas.width  = img.width;
-          canvas.height = img.height;
+          if (canvas.width  !== img.width)  canvas.width  = img.width;
+          if (canvas.height !== img.height) canvas.height = img.height;
           ctx.drawImage(img, 0, 0);
         }
-        URL.revokeObjectURL(url);
-        scheduleNextFrame(); // only schedule next frame after receiving this one (ping-pong)
-      };
-      img.onerror = () => { URL.revokeObjectURL(url); scheduleNextFrame(); };
-      img.src = url;
+        img.close?.();
+        const done = performance.now();
+        perfRef.current?.received(buf.byteLength, sentAt === undefined ? 0 : done - sentAt, done - decodeStart);
+      }).catch(() => { /* undecodable frame — the next one replaces it */ });
     };
 
     ws.onclose = (ev) => {
       console.log('[Workout] websocket closed (code=%d, reason=%s)', ev.code, ev.reason);
       frameLoopActiveRef.current = false;
+      if (frameTimerRef.current !== null) {
+        clearTimeout(frameTimerRef.current);
+        frameTimerRef.current = null;
+      }
+      inFlightRef.current = [];
       if (stoppingRef.current) return;
       if (reconnectAttemptsRef.current < 3) {
         reconnectAttemptsRef.current += 1;
         setConnectionState('RECONNECTING');
         console.log('[Workout] reconnect attempt', reconnectAttemptsRef.current);
         reconnectTimerRef.current = setTimeout(() => {
-          if (sessionRef.current) openWs(sessionRef.current.sessionId);
+          reconnectTimerRef.current = null;
+          if (sessionRef.current && !stoppingRef.current) openWsRef.current(sessionRef.current.sessionId);
         }, 2000);
       } else {
         setConnectionState('ERROR');
@@ -327,19 +407,28 @@ export function useWorkoutSession(): UseWorkoutSessionReturn {
       console.error('[Workout] websocket error:', ev);
       ws.close();
     };
-  }, [closeWs, scheduleNextFrame]);
+  }, [closeWs, schedulePump]);
+
+  useEffect(() => { openWsRef.current = openWs; }, [openWs]);
 
   // ── Stats polling ─────────────────────────────────────────────────────────────
 
   const startStatsPolling = useCallback((sid: string) => {
     if (statsIntervalRef.current) clearInterval(statsIntervalRef.current);
     statsIntervalRef.current = setInterval(async () => {
-      if (pausedRef.current || stoppingRef.current) return;
+      // Skip while a previous poll is still outstanding: overlapping requests pile up
+      // when the backend is slow and can resolve out of order (older stats over newer).
+      if (pausedRef.current || stoppingRef.current || statsInFlightRef.current) return;
+      statsInFlightRef.current = true;
+      const t0 = performance.now();
       try {
         const s = await getWorkoutStats(sid);
-        setStats(s);
+        perfRef.current?.statsPoll(performance.now() - t0);
+        if (!stoppingRef.current) setStats(s);
       } catch {
         // silently swallow poll errors
+      } finally {
+        statsInFlightRef.current = false;
       }
     }, STATS_POLL_INTERVAL_MS);
   }, []);
@@ -349,6 +438,7 @@ export function useWorkoutSession(): UseWorkoutSessionReturn {
       clearInterval(statsIntervalRef.current);
       statsIntervalRef.current = null;
     }
+    statsInFlightRef.current = false;
   }, []);
 
   // ── Elapsed timer ─────────────────────────────────────────────────────────────
@@ -424,13 +514,17 @@ export function useWorkoutSession(): UseWorkoutSessionReturn {
     setSession(ws);
     sessionRef.current = ws;
 
-    // STEP 4: Start background services (WS, stats, timer).
-    // Small timeout lets React flush the LiveWorkoutView render so its <video> ref exists.
-    setTimeout(() => {
-      openWs(sessionData.session_id);
-      startStatsPolling(sessionData.session_id);
-      startTimer(new Date(sessionData.started_at));
-    }, 150);
+    // STEP 4: Start background services (WS, stats, timer). No artificial delay
+    // needed: the frame loop looks up the <video> element lazily on every tick, so it
+    // simply waits until LiveWorkoutView has rendered and the stream is playing.
+    perfRef.current?.stop();
+    perfRef.current = createWorkoutPerfMeter();
+    inFlightRef.current = [];
+    rxSeqRef.current = 0;
+    paintedSeqRef.current = 0;
+    openWs(sessionData.session_id);
+    startStatsPolling(sessionData.session_id);
+    startTimer(new Date(sessionData.started_at));
   }, [acquireCamera, stopCamera, openWs, startStatsPolling, startTimer]);
 
   const endSession = useCallback(async () => {
@@ -444,10 +538,13 @@ export function useWorkoutSession(): UseWorkoutSessionReturn {
     console.log('[Workout] stopping session:', sid);
 
     if (frameTimerRef.current) { clearTimeout(frameTimerRef.current); frameTimerRef.current = null; }
+    if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
     stopStatsPolling();
     stopTimer();
     closeWs();
     stopCamera();
+    perfRef.current?.stop();
+    perfRef.current = null;
 
     try {
       const result = await stopWorkoutSession(sid);
@@ -484,6 +581,8 @@ export function useWorkoutSession(): UseWorkoutSessionReturn {
       closeWs();
       stopCamera();
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      perfRef.current?.stop();
+      perfRef.current = null;
     };
   }, [closeWs, stopCamera, stopStatsPolling, stopTimer]);
 

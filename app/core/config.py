@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     LOG_LEVEL: str = "INFO"
 
+    # Opt-in per-connection timing summary for /ws/webcam (see app/core/ws_perf.py).
+    # Off by default; set PERF_LOG=1 on the server to diagnose frame-pipeline latency.
+    PERF_LOG: bool = False
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

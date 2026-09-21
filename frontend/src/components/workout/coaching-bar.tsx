@@ -15,6 +15,7 @@ export function CoachingBar({ stats }: CoachingBarProps) {
   const [displayed, setDisplayed] = useState<string>(NEUTRAL_MESSAGE);
   const [isViolation, setIsViolation] = useState(false);
   const lastViolationRef = useRef<string>('');
+  const pendingRef = useRef<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -27,20 +28,33 @@ export function CoachingBar({ stats }: CoachingBarProps) {
     const newMessage = topViolation || feedback || NEUTRAL_MESSAGE;
     const newIsViolation = Boolean(topViolation);
 
-    // Debounce to avoid flickering on every frame
-    if (newMessage !== lastViolationRef.current) {
+    // Debounce to avoid flickering. `stats` is a new object on every poll (~800 ms),
+    // shorter than the debounce window, so the pending timer must NOT be cancelled by
+    // this effect's cleanup — that made every change get cleared before it could fire
+    // and the bar never left its initial message. Only cancel when the message
+    // reverts to what is already displayed; leave an already-pending change alone.
+    if (newMessage === lastViolationRef.current) {
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        lastViolationRef.current = newMessage;
-        setDisplayed(newMessage);
-        setIsViolation(newIsViolation);
-      }, CORRECTION_DEBOUNCE_MS);
+      debounceRef.current = null;
+      pendingRef.current = null;
+      return;
     }
+    if (pendingRef.current === newMessage) return;
 
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    pendingRef.current = newMessage;
+    debounceRef.current = setTimeout(() => {
+      debounceRef.current = null;
+      pendingRef.current = null;
+      lastViolationRef.current = newMessage;
+      setDisplayed(newMessage);
+      setIsViolation(newIsViolation);
+    }, CORRECTION_DEBOUNCE_MS);
   }, [stats]);
+
+  useEffect(() => () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+  }, []);
 
   return (
     <div

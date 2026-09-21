@@ -3,6 +3,7 @@ import random
 import cv2
 import mediapipe as mp
 import numpy as np
+import threading
 import time
 
 logger = logging.getLogger(__name__)
@@ -456,6 +457,11 @@ class WorkoutSessionState:
     def __init__(self, session_id: str, exercise: str = "squat", target_reps: int = 10, target_sets: int = 3, rest_duration: int = 60):
         self.session_id = session_id
         self.pose = _create_pose()
+        # MediaPipe's Pose graph is not thread-safe. Callers that run process_frame()
+        # on a worker thread (main.ws_webcam) hold this lock for the call, and anything
+        # that swaps or closes `pose` must hold it too. Reentrant so a thread already
+        # inside the lock may still reach delete_session()/start_session() safely.
+        self.lock = threading.RLock()
         self.state = _create_default_rep_state(exercise)
         self.session = _create_default_session_state(exercise, target_reps, target_sets, rest_duration)
         self.last_accessed = time.time()
@@ -496,7 +502,8 @@ def delete_session(session_id: str):
     if session_id in _sessions:
         sess = _sessions.pop(session_id)
         try:
-            sess.pose.close()
+            with sess.lock:  # never close the tracker under a frame being processed
+                sess.pose.close()
         except Exception:
             pass
 
@@ -1056,8 +1063,18 @@ def _advance_rep_state(st, sn, sess, angle, current_time, config, current_exerci
 
 def start_session(exercise, target_reps, target_sets, rest_duration=60, session_id: str = None):
     sid = session_id or DEFAULT_SESSION_ID
+    existed = sid in _sessions
     sess = get_session_state(sid)
-    sess.pose = _create_pose()
+    if existed:
+        # A brand-new WorkoutSessionState already owns a fresh Pose (created in its
+        # __init__); only a re-started, pre-existing session needs its tracker reset
+        # so the previous run's last-known ROI cannot bias the first frames.
+        with sess.lock:
+            old_pose, sess.pose = sess.pose, _create_pose()
+            try:
+                old_pose.close()
+            except Exception:
+                pass
     sn = sess.session
     sn["active"]                  = True
     sn["exercise"]                = exercise

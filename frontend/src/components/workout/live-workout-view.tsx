@@ -8,6 +8,7 @@ import { ConnectionStatus } from './connection-status';
 import { StatsPanel } from './stats-panel';
 import { CoachingBar } from './coaching-bar';
 import { EndWorkoutDialog } from './end-workout-dialog';
+import { markLiveViewRender } from '@/lib/workout-perf';
 
 function formatExercise(ex: string): string {
   return ex.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -35,6 +36,7 @@ export function LiveWorkoutView({
   onEnd,
   onTogglePause,
 }: LiveWorkoutViewProps) {
+  markLiveViewRender();
   const [showEndDialog, setShowEndDialog] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const isStopping = connectionState === 'STOPPING';
