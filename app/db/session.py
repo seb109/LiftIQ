@@ -14,6 +14,11 @@ if _db_url.startswith("sqlite"):
     _engine_kwargs["connect_args"] = {"check_same_thread": False}
 else:
     _engine_kwargs["pool_pre_ping"] = True
+    # SQLAlchemy's default (pool_size=5, max_overflow=10 -> 15 connections total) left
+    # zero headroom above the concurrent-user counts this backend is expected to serve;
+    # any transient spike in held connections would exhaust the pool outright.
+    _engine_kwargs["pool_size"] = 10
+    _engine_kwargs["max_overflow"] = 20
 
 try:
     engine = create_engine(_db_url, **_engine_kwargs)

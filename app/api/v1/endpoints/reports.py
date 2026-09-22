@@ -2,6 +2,7 @@ import uuid
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import get_current_user
 from app.db.session import get_db
@@ -73,7 +74,7 @@ async def generate_report(
         )
 
     workout_repo = WorkoutSessionRepository(db)
-    session_entity = workout_repo.get_by_id(session_uuid)
+    session_entity = await run_in_threadpool(workout_repo.get_by_id, session_uuid)
 
     if not session_entity or session_entity.user_id != current_user.id:
         raise HTTPException(

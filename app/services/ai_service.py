@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from ai_trainer import client as groq_client
 from app.models.ai_report import AIReport
@@ -202,8 +203,9 @@ async def generate_and_persist_ai_report(
     """Idempotently generates and persists an AIReport for a completed WorkoutSession."""
     report_repo = AIReportRepository(db)
 
-    # Idempotency check: return existing report if present
-    existing = report_repo.get_by_session_id(session.id)
+    # Idempotency check: return existing report if present. Sync SQLAlchemy call,
+    # so it must not run directly on the event loop (see the persist step below).
+    existing = await run_in_threadpool(report_repo.get_by_session_id, session.id)
     if existing:
         return existing
 
@@ -228,14 +230,18 @@ async def generate_and_persist_ai_report(
         created_at=now
     )
 
-    try:
-        report_repo.create(report_entity)
-        session.ai_report_generated = True
-        db.commit()
-        db.refresh(report_entity)
-    except Exception:
-        db.rollback()
-        logger.exception("Failed to persist AIReport for session %s", session.id)
-        raise
+    def _persist() -> AIReport:
+        try:
+            report_repo.create(report_entity)
+            session.ai_report_generated = True
+            db.commit()
+            db.refresh(report_entity)
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to persist AIReport for session %s", session.id)
+            raise
+        return report_entity
 
-    return report_entity
+    # Blocking SQLAlchemy commit/refresh: keep it off the event loop, same as the
+    # idempotency check above.
+    return await run_in_threadpool(_persist)

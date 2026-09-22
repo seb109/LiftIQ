@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 import gym_trainer as gt
 from app.api.deps import get_current_user
@@ -107,8 +108,13 @@ async def stop_workout_session_body(
     return await _process_end_session(session_id, current_user, db)
 
 
-async def _process_end_session(session_id_str: str, current_user: User, db: Session):
-    """Helper to finalize workout session, aggregate metrics, and persist to DB."""
+def _finalize_session_sync(db: Session, session_id_str: str, current_user: User):
+    """Synchronous lookup/validate/persist work for ending a session.
+
+    Runs entirely off the event loop (via run_in_threadpool below): it does
+    blocking SQLAlchemy reads/commits, which would otherwise stall every other
+    request on this single-worker process for the duration of each DB round trip.
+    """
     try:
         session_uuid = uuid.UUID(session_id_str)
     except ValueError:
@@ -202,6 +208,15 @@ async def _process_end_session(session_id_str: str, current_user: User, db: Sess
     # Clean up in-memory session
     gt.end_session(session_id_str)
 
+    return session_entity, total_reps, duration, avg_form_score, completed_sets
+
+
+async def _process_end_session(session_id_str: str, current_user: User, db: Session):
+    """Helper to finalize workout session, aggregate metrics, and persist to DB."""
+    session_entity, total_reps, duration, avg_form_score, completed_sets = await run_in_threadpool(
+        _finalize_session_sync, db, session_id_str, current_user
+    )
+
     # Attempt AI report generation AFTER workout completion transaction
     from app.services.ai_service import generate_and_persist_ai_report
     report_id_str = None
@@ -218,7 +233,7 @@ async def _process_end_session(session_id_str: str, current_user: User, db: Sess
         "total_reps": total_reps,
         "duration_seconds": duration,
         "average_form_score": avg_form_score,
-        "ended_at": now.isoformat()
+        "ended_at": session_entity.ended_at.isoformat()
     }
     if report_id_str:
         resp_data["report_id"] = report_id_str

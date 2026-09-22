@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 import gym_trainer as gt
 import ai_trainer as ai
 import tempfile
@@ -265,7 +266,8 @@ async def trigger_set_feedback(
     db: Session = Depends(get_db),
 ):
     """Called after a set completes to get Groq feedback"""
-    _require_owned_session(session_id, current_user, db)
+    # Sync SQLAlchemy lookup inside an async def route; keep it off the event loop.
+    await run_in_threadpool(_require_owned_session, session_id, current_user, db)
     sess = gt.get_session_state(session_id)
     s = sess.session
     if s["completed_sets"]:
@@ -401,7 +403,8 @@ async def ws_webcam(
     camera, runs them through the gym_trainer engine for session_id, and
     streams the processed JPEG frames back. Exactly one response per frame,
     in order."""
-    authorized = _ws_authorize_session(session_id, token, db)
+    # Sync SQLAlchemy lookup inside an async def handler; keep it off the event loop.
+    authorized = await run_in_threadpool(_ws_authorize_session, session_id, token, db)
     # The auth query leaves the SQLAlchemy session holding a pooled DB connection
     # (open transaction). Release it now: this handler lives for the whole workout
     # and would otherwise pin one Postgres connection per active workout.

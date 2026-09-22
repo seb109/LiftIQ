@@ -1,4 +1,5 @@
 import logging
+import os
 import random
 import cv2
 import mediapipe as mp
@@ -12,17 +13,27 @@ logger = logging.getLogger(__name__)
 mp_pose = mp.solutions.pose
 mp_drawing = mp.solutions.drawing_utils
 
+# Building a Pose graph (TFLite model load + graph construction) is CPU/memory-heavy.
+# A burst of concurrent session starts each building one at the same instant can spike
+# a small host past its limit; bounding how many builds run at once turns that spike
+# into a brief queue instead. Does not change the number of Pose instances created,
+# their parameters, or per-frame behavior — only how many can be under construction
+# simultaneously. Configurable since the right ceiling depends on host CPU count.
+_POSE_INIT_CONCURRENCY = max(1, int(os.environ.get("POSE_INIT_CONCURRENCY", "4")))
+_pose_init_semaphore = threading.Semaphore(_POSE_INIT_CONCURRENCY)
+
 
 def _create_pose():
     # A fresh instance each session start — MediaPipe's Pose tracker keeps
     # internal state (its last-known ROI) between calls, which otherwise
     # biases landmark detection on the next session's opening frames with
     # whatever the previous, unrelated video/session last saw.
-    return mp_pose.Pose(
-        model_complexity=1,
-        min_detection_confidence=0.6,
-        min_tracking_confidence=0.6
-    )
+    with _pose_init_semaphore:
+        return mp_pose.Pose(
+            model_complexity=1,
+            min_detection_confidence=0.6,
+            min_tracking_confidence=0.6
+        )
 
 
 pose = _create_pose()
